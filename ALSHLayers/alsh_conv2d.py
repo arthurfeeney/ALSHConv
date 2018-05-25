@@ -4,7 +4,7 @@ import torch.autograd as autograd
 import torch.nn as nn
 import torch.nn.functional as F
 import pyinn as P
-from alsh_op import ALSHOp
+from alsh_conv2d_op import ALSHConv2dOp
 
 class ALSHConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
@@ -21,15 +21,17 @@ class ALSHConv2d(nn.Module):
         self.Q = Q # query function
 
         # number of kernels * kernels_size * kernel_size * depth
-        self.kernels = nn.Parameter(torch.empty(out_channels, kernel_size,
-                                                kernel_size, in_channels),
-                                    requires_grad=True).cuda()
+        self.kernels = torch.empty(out_channels, kernel_size,
+                                   kernel_size, in_channels).cuda()
         torch.nn.init.xavier_normal_(self.kernels)
+        # make it a matrix where each kernel is a row.
 
         self.__hash = hf
         self.__table_size = table_size
 
         self.table = self.__build_alsh_table__()
+        self.kernels = nn.Parameter(self.kernels.view(self.out_channels, -1),
+                                    requires_grad=True).cuda()
 
         self.cache = None
 
@@ -59,62 +61,12 @@ class ALSHConv2d(nn.Module):
     def forward(self, x, mode):
         #if (self.cache is not None) and mode:
         #    self.rehash()
-
         #self.cache = x
 
-        input_dims = x.size()
-        num_inputs = input_dims[0]
-        h1 = input_dims[1]
-        w1 = input_dims[2]
+        return ALSHConv2dOp.apply(x, self.kernels, self.kernel_size,
+                                  self.stride, self.padding,
+                                  self.in_channels, self.Q, self.m,
+                                  self.__hash, self.table, self.__table_size)
 
-
-        # height and width of the output
-        h2 = (h1 - self.kernel_size + 2*self.padding) / self.stride + 1
-        w2 = (w1 - self.kernel_size + 2*self.padding) / self.stride + 1
-
-        kernel_elem = self.kernel_size**2 * self.in_channels
-
-        # make input patches.
-        y = P.im2col(x.cuda(), self.kernel_size, self.stride, self.padding)
-        y = y.permute(0,1,4,2,3,5)
-        #y = y.view(y.size()[0:-1])
-
-        #y = y.view(self.out_channels, -1).cuda()
-
-        # make kernels a row matrix.
-        weight = self.kernels.view(self.out_channels, -1).cuda()
-
-        #y = ALSHOp.apply(y, weight, self.Q, self.m, self.__hash, self.table,
-        #                 self.__table_size, True).cuda()
-
-        trans = torch.Tensor(kernel_elem, num_inputs * h2 * w2)
-        trans = trans.cuda()
-
-        print(y.size())
-
-        # make input a column matrix
-        c = 0
-        for image in y:
-            for col in image:
-                for d in range(kernel_elem / 3):
-                #for t in col:
-                    t = col[d*3:((d+1)*3)]
-                    input_col = t.contiguous().view(-1)
-                    trans[:, c] = input_col
-                    c += 1
-
-        print(weight.size(), trans.size())
-
-        # compute output
-        out = weight.mm(trans)
-
-        # reshape output into an image
-        out = out.view(num_inputs, h2, w2, self.out_channels)
-
-
-        # reshape output column matrix into image
-        #out = P.col2im(out, self.kernel_size, self.stride, self.padding)
-
-        return out
 
 

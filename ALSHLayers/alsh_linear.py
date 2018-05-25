@@ -82,7 +82,7 @@ class ALSHLinear(nn.Module):
             self.rehash()
 
         out = ALSHOp.apply(x, self.weight, self.Q, self.m, self.__hash,
-                           self.table, self.__table_size, False).cuda()
+                           self.table, self.__table_size).cuda()
 
         self.cache = x
 

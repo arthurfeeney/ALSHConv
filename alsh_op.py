@@ -3,13 +3,9 @@ import torch
 
 class ALSHOp(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x, weight, Q, m, hf, table, table_size, conv):
+    def forward(ctx, x, weight, Q, m, hf, table, table_size):
 
-        ave_input = None
-        if conv:
-            ave_input = torch.mean(x.transpose(0,1), dim=0)
-        else:
-            ave_input = torch.mean(x, dim=0)
+        ave_input = torch.mean(x, dim=0)
 
         # Query should be a unit vector when hashing.
         # It's okay to just normalize right before because it won't affect
@@ -17,14 +13,11 @@ class ALSHOp(torch.autograd.Function):
 
         unit_ave_input = ave_input / torch.norm(ave_input)
 
-        print(unit_ave_input.size())
-
-
         hash_out = hf(Q(unit_ave_input, m))
 
         hash_out.fmod_(table_size)
-        hash_out.abs_
-        index = hash_out.int()
+        hash_out.abs_()
+        index = hash_out.long()
 
         rows = table[index].cuda()
 

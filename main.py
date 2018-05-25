@@ -26,7 +26,7 @@ def main():
 
     net = ALSHConv.ALSHConvNet().cuda()
 
-    train(net, trainloader, 1)
+    train(net, trainloader, 3)
 
     correct, total = test(net, testloader)
 
@@ -45,7 +45,7 @@ def train(net, trainloader, num_epochs):
             inputs = inputs.cuda()
             labels = labels.cuda()
 
-            inputs.resize_(2, 32, 32, 3)
+            inputs.resize_(2, 3, 32, 32)
 
             optimizer.zero_grad()
             outputs = net(inputs)
@@ -68,7 +68,7 @@ def test(net, testloader):
             inputs = inputs.cuda()
             labels = labels.cuda()
 
-            inputs.resize_(1, 32, 32, 3)
+            inputs.resize_(1, 3, 32, 32)
 
             outputs = net(inputs, False)
             _, predicted = torch.max(outputs.data, 1)

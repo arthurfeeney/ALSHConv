@@ -10,5 +10,4 @@ def append_norm_powers(x, m):
 def append_halves(x, m):
     # x is a 1d array.
     halves = (torch.ones(m) / 2).cuda()
-    print(x.size(), halves.size())
     return torch.cat((x, halves))
