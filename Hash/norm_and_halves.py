@@ -9,5 +9,5 @@ def append_norm_powers(x, m):
 
 def append_halves(x, m):
     # x is a 1d array.
-    halves = (torch.ones(m) / 2).cuda()
+    halves = torch.cuda.FloatTensor(m).fill_(.5)
     return torch.cat((x, halves))

@@ -15,7 +15,7 @@ def main():
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                             download=True,
                                             transform=transform)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=2,
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=32,
                                               shuffle=True, num_workers=2)
 
     testset = torchvision.datasets.CIFAR10(root='./data', train=False,
@@ -26,7 +26,7 @@ def main():
 
     net = ALSHConv.ALSHConvNet().cuda()
 
-    train(net, trainloader, 3)
+    train(net, trainloader, 1)
 
     correct, total = test(net, testloader)
 
@@ -36,7 +36,9 @@ def main():
 
 def train(net, trainloader, num_epochs):
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=.001)
+    optimizer = torch.optim.Adam(
+                    filter(lambda p: p.requires_grad, net.parameters()),
+                    lr=.0001)
 
     for epoch in range(num_epochs):
         for i, data in enumerate(trainloader, 0):
@@ -45,7 +47,7 @@ def train(net, trainloader, num_epochs):
             inputs = inputs.cuda()
             labels = labels.cuda()
 
-            inputs.resize_(2, 3, 32, 32)
+            inputs.resize_(32, 3, 32, 32)
 
             optimizer.zero_grad()
             outputs = net(inputs)
