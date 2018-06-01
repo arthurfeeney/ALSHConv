@@ -15,7 +15,7 @@ def main():
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                             download=True,
                                             transform=transform)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=32,
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=100,
                                               shuffle=True, num_workers=2)
 
     testset = torchvision.datasets.CIFAR10(root='./data', train=False,
@@ -26,7 +26,7 @@ def main():
 
     net = ALSHConv.ALSHConvNet().cuda()
 
-    train(net, trainloader, 1)
+    train(net, trainloader, 3)
 
     correct, total = test(net, testloader)
 
@@ -47,7 +47,7 @@ def train(net, trainloader, num_epochs):
             inputs = inputs.cuda()
             labels = labels.cuda()
 
-            inputs.resize_(32, 3, 32, 32)
+            inputs.resize_(100, 3, 32, 32)
 
             optimizer.zero_grad()
             outputs = net(inputs)

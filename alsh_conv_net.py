@@ -27,17 +27,27 @@ class ALSHConvNet(nn.Module):
         self.l3 = ALSHConv2d(20, 20, 5, 1, 2, True, self.h3, 2, 5,
                              P=append_norm_powers, Q=append_halves)
         #self.l3 = nn.Conv2d(20, 20, 5, 1, 2, bias=False)
+        self.p3 = nn.AdaptiveMaxPool3d((20,4,4))
         self.p3 = nn.MaxPool2d(2)
         self.out = nn.Linear(320, 10)
 
     def forward(self, x, mode=True):
         batch_size = x.size()[0]
-        x = F.relu(self.l1(x, mode))
-        x = self.p1(x)
-        x = F.relu(self.l2(x, mode))
-        x = self.p2(x)
-        x = F.relu(self.l3(x, mode))
-        x = self.p3(x)
-        x = x.view(batch_size, -1).cuda() # flatten
+        x, i = self.l1(x, mode)
+        x    = F.relu(x)
+        x    = self.p1(x)
+        x, i = self.l2(x, mode, i)
+        x    = F.relu(x)
+        x    = self.p2(x)
+        x, i = self.l3(x, mode, i)
+        x    = F.relu(x)
+
+        # zero fill x
+        t = torch.empty(batch_size, 20, 8, 8).cuda().fill_(0)
+        t[:,i,:,:] = x[:,]
+        x = self.p3(t)
+
+        x = x.view(batch_size, -1)
+
         x = self.out(x)
         return x

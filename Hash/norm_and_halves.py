@@ -1,5 +1,7 @@
 
 import torch
+import cupy
+from string import Template
 
 def append_norm_powers(x, m):
     # x is just a 1d array
