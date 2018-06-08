@@ -6,15 +6,16 @@ from Hash.stable_distribution import StableDistribution
 from ALSHLayers.alsh_linear import ALSHLinear
 from ALSHLayers.alsh_conv2d import ALSHConv2d
 from Hash.norm_and_halves import append_norm_powers, append_halves
+from cp_utils import zero_fill_missing
 
 
 class ALSHConvNet(nn.Module):
     def __init__(self):
         super(ALSHConvNet, self).__init__()
 
-        self.h1 = StableDistribution(75 + 5, .1)
-        self.h2 = StableDistribution(400 + 5, .1)
-        self.h3 = StableDistribution(500 + 5, .1)
+        self.h1 = StableDistribution(75 + 5, .2)
+        self.h2 = StableDistribution(400 + 5, .2)
+        self.h3 = StableDistribution(500 + 5, .2)
 
         self.l1 = ALSHConv2d(3, 16, 5, 1, 2, True, self.h1, 2, 5,
                              P=append_norm_powers, Q=append_halves)
@@ -27,7 +28,6 @@ class ALSHConvNet(nn.Module):
         self.l3 = ALSHConv2d(20, 20, 5, 1, 2, True, self.h3, 2, 5,
                              P=append_norm_powers, Q=append_halves)
         #self.l3 = nn.Conv2d(20, 20, 5, 1, 2, bias=False)
-        self.p3 = nn.AdaptiveMaxPool3d((20,4,4))
         self.p3 = nn.MaxPool2d(2)
         self.out = nn.Linear(320, 10)
 
@@ -42,9 +42,7 @@ class ALSHConvNet(nn.Module):
         x, i = self.l3(x, mode, i)
         x    = F.relu(x)
 
-        # zero fill x
-        t = torch.empty(batch_size, 20, 8, 8).cuda().fill_(0)
-        t[:,i,:,:] = x[:,]
+        t = zero_fill_missing(x, i, (batch_size, 20, 8, 8))
         x = self.p3(t)
 
         x = x.view(batch_size, -1)

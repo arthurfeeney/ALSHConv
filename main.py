@@ -6,10 +6,12 @@ import torchvision.transforms as transforms
 import torch.optim as optim
 import alsh_net as ALSH
 import alsh_conv_net as ALSHConv
+import alsh_alex_net as ALSHAlex
 
 def main():
     transform = transforms.Compose(
-        [transforms.ToTensor(),
+        [#transforms.Resize((227,227)),
+         transforms.ToTensor(),
          transforms.Normalize((.5,.5,.5), (.5,.5,.5))])
 
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
@@ -25,8 +27,9 @@ def main():
                                              shuffle=False, num_workers=2)
 
     net = ALSHConv.ALSHConvNet().cuda()
+    #net = ALSHAlex.ALSHAlexNet().cuda()
 
-    train(net, trainloader, 3)
+    train(net, trainloader, 50)
 
     correct, total = test(net, testloader)
 
@@ -47,6 +50,7 @@ def train(net, trainloader, num_epochs):
             inputs = inputs.cuda()
             labels = labels.cuda()
 
+            #inputs = inputs.expand(-1, -1, 227, 227)
             inputs.resize_(100, 3, 32, 32)
 
             optimizer.zero_grad()
@@ -70,6 +74,7 @@ def test(net, testloader):
             inputs = inputs.cuda()
             labels = labels.cuda()
 
+            #inputs = inputs.expand(-1, -1, 227, 227)
             inputs.resize_(1, 3, 32, 32)
 
             outputs = net(inputs, False)
