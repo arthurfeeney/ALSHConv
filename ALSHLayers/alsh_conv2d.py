@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import pyinn as P
 import cupy as cp
 from math import sqrt
-from cp_utils import count_votes, get_true_las
+from Utility.cp_utils import count_votes, get_true_las, rehash_alsh_table
 
 class ALSHConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
@@ -35,8 +35,8 @@ class ALSHConv2d(nn.Module):
         else:
             self.bias = None
 
-        #self.reset_parameters()
-        self.init_xavier_uniform()
+        self.reset_parameters()
+        #self.init_xavier_uniform()
 
         self._hash = hf
         self._table_size = table_size
@@ -46,9 +46,11 @@ class ALSHConv2d(nn.Module):
                                                       -1),
                                     requires_grad=True).cuda()
 
-        self.table, self.table_row_lengths = self._build_alsh_table()
+        self.table, self.table_row_lengths = None, None
+        self._build_alsh_table()
 
         self.cache = {}
+
 
     def init_xavier_uniform(self):
         nn.init.xavier_uniform_(self.kernels)
@@ -64,10 +66,10 @@ class ALSHConv2d(nn.Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def _build_alsh_table(self):
-        table = torch.empty(self._table_size,
-                            self._kernel_span).long().cuda().fill_(0)
-
-        indices = torch.empty(self._table_size).long().cuda().fill_(0)
+        self.table = torch.empty(self._table_size,
+                            self.out_channels).long().cuda().fill_(0)
+        self.table_row_lengths = \
+            torch.empty(self._table_size).long().cuda().fill_(0)
 
         a_row_matr = self._hash.a.view(1, self._hash.a.size()[0])
         idx = a_row_matr.mm(self.P(self.kernels, self.m).transpose(0,1))
@@ -78,25 +80,24 @@ class ALSHConv2d(nn.Module):
         idx.fmod_(self._table_size)
         idx.abs_()
 
-        for i, index in enumerate(idx):
-            table[index, indices[index]] = i
-            indices[index] += 1
+        rows = torch.range(0, self.out_channels-1).long().cuda()
 
-        return table, indices
+        self.table, self.table_row_lengths = \
+            rehash_alsh_table(self.table, self.table_row_lengths, idx, rows,
+                              self._table_size, self.out_channels)
 
     def _rehash(self):
         if self.cache['rows'].size() == torch.Size([0]):
-            # if no rows, everything was used, so rehash it all
-            self.table, self.table_row_lengths = self._build_alsh_table()
+            # if no rows, everything was used, so just rehash it all
+            self._build_alsh_table()
         else:
             self.table_row_lengths[self.cache['index']] = 0
             rows = self.cache['rows']
             # this is done on cpu :(
-            a_row_matr = self._hash.a.view(1, self._hash.a.size()[0])
+            a_row_matr = self._hash.a.view(1, self._hash.a.size()[0]).cuda()
             indices = a_row_matr.mm(self.P(
                                             self.kernels[rows], self.m
-                                          ).transpose(0,1)
-                                   )
+                                          ).transpose(0,1))
             indices = indices.view(-1).cuda()
             indices = torch.floor((indices + self._hash.b) / self._hash.r)
             indices = indices.long()
@@ -104,10 +105,9 @@ class ALSHConv2d(nn.Module):
             indices.fmod_(self._table_size)
             indices.abs_()
 
-            # there aren't that many indices, so this should be fine
-            for i, index in enumerate(indices):
-                self.table[index, self.table_row_lengths[index]] = rows[i]
-                self.table_row_lengths[index] += 1
+            self.table, self.table_row_lengths = \
+                rehash_alsh_table(self.table, self.table_row_lengths, indices,
+                                  rows, self._table_size, self.out_channels)
 
 
     def _vote(self, input, las=None):
@@ -116,16 +116,19 @@ class ALSHConv2d(nn.Module):
         bucket.
         """
 
+        unit_input_cols = input / input.norm(dim=0).expand_as(input)
         if las is None:
             # called from _simp_forward
             a_row_matr = self._hash.a.view(1, self._hash.a.size()[0])
-            votes = a_row_matr.mm(self.Q(input, self.m))
+            votes = a_row_matr.mm(self.Q(unit_input_cols, self.m))
             votes = torch.floor((votes + self._hash.b) / self._hash.r)
             votes = votes.view(-1).long().cuda()
 
-            counts = count_votes(votes, self._table_size)
+            votes.fmod_(self._table_size)
+            votes.abs_()
 
-            return torch.argmax(counts)
+            return torch.argmax(count_votes(votes, self._table_size))
+
         else:
             a_size = self._hash.a.size()[0]
             m_indices = torch.range(a_size-self.m, a_size-1).long().cuda()
@@ -133,20 +136,22 @@ class ALSHConv2d(nn.Module):
             las = torch.cat((las, m_indices)).long().cuda()
 
             a_row_matr = self._hash.a[las].view(1, las.size()[0])
-            votes = a_row_matr.mm(self.Q(input, self.m))
+            votes = a_row_matr.mm(self.Q(unit_input_cols, self.m))
             votes = torch.floor((votes + self._hash.b) / self._hash.r)
             votes = votes.view(-1).long().cuda()
 
-            counts = count_votes(votes, self._table_size)
+            votes.fmod_(self._table_size)
+            votes.abs_()
 
-            return torch.argmax(counts)
+            return torch.argmax(count_votes(votes, self._table_size))
 
 
     def _simp_forward(self, input, mode):
-        # dimensions of the input
+        # this is called if every kernel in the last layer was used.
         if not input.is_contiguous():
             input = input.contiguous()
 
+        # dimensions of the input
         input_dims = input.size()
         num_inputs = input_dims[0]
         h1 = input_dims[2]
@@ -155,7 +160,6 @@ class ALSHConv2d(nn.Module):
         # height and width of the output
         h2 = (h1 - self.kernel_size + 2*self.padding) // self.stride + 1
         w2 = (w1 - self.kernel_size + 2*self.padding) // self.stride + 1
-
 
         k = self.kernel_size**2
 
@@ -179,27 +183,26 @@ class ALSHConv2d(nn.Module):
         self.cache['index'] = index
 
         # get the "active set" of the kernels.
-        rows = self.table[index,0:self.table_row_lengths[index]]
-        rows = rows.view(-1)
+        self.cache['rows'] = \
+            self.table[index,0:self.table_row_lengths[index]].view(-1)
 
-        # save rows for rehashing
-        self.cache['rows'] = rows
-
-        oc = 0
-        out = torch.Tensor([]).cuda()
-        if rows.size() != torch.Size([0]):
+        if self.table_row_lengths[index] != 0:
             # if there are some rows in the bucket, only perform the forward
             # pass with them
-            sub_out = self.kernels[rows].mm(patch_matr)
-            oc = self.kernels[rows].size()[0]
+            self.cache['rows'] = self.cache['rows'].sort()[0]
 
-            out = sub_out
-            scale = rows.size()[0] / self.kernels.size()[0]
-            out /= scale # need to scale values in output b/c there's less
+            out = self.kernels[self.cache['rows']].mm(patch_matr)
+
+            oc = int(self.table_row_lengths[index])
+
+            if mode:
+                scale = torch.tensor(float(self.table_row_lengths[index]) /
+                                    self.out_channels).cuda()
+                out /= scale # need to scale values in output b/c there's less
         else:
             # if there's no rows in the bucket, just use entire kernel.
             out = self.kernels.mm(patch_matr).cuda()
-            oc = self.kernels.size()[0]
+            oc = self.out_channels
 
         # O x N x (h2*w2)
         out = out.view(oc, num_inputs, h2*w2)
@@ -207,17 +210,14 @@ class ALSHConv2d(nn.Module):
         # N x O x (h2*w2)
         out.transpose_(0,1)
 
-        # N x O x h2 x w2 - proper output dims
-        #out = out.view(num_inputs, oc, h2, w2)
-
         #if self.bias is not None:
         #    if rows is not None:
         #        return (out + self.bias[:,rows].expand_as(out)), rows
         #    else:
         #        return (out + self.bias.expand_as(out)), rows
-        if rows.size() == torch.Size([0]):
+        if self.table_row_lengths[index] == 0:
             return out.view(num_inputs, oc, h2, w2), None
-        return out.view(num_inputs, oc, h2, w2), rows
+        return out.view(num_inputs, oc, h2, w2), self.cache['rows']
 
     @staticmethod
     def true_las(las, kernel_size):
@@ -269,26 +269,25 @@ class ALSHConv2d(nn.Module):
         self.cache['index'] = index
 
         # get the "active set" of the kernels.
-        rows = self.table[index,0:self.table_row_lengths[index]]
-        rows = rows.view(-1)
-
-        # save rows for rehashing
-        self.cache['rows'] = rows
+        self.cache['rows'] = \
+            self.table[index, 0:self.table_row_lengths[index]].view(-1)
 
         active = self.kernels[:,l]
 
-        oc = 0
-        out = torch.Tensor([]).cuda()
-        if rows.size() != torch.Size([0]):
+        if self.table_row_lengths[index] != 0:
             # if there are some rows in the bucket, only perform the forward
             # pass with them
-            sub_out = active[rows].mm(patch_matr)
 
-            oc = rows.size()[0]
+            self.cache['rows'] = self.cache['rows'].sort()[0]
 
-            out = sub_out
-            scale = rows.size()[0] / self.kernels.size()[0]
-            out /= scale # scale up by number of rows useds
+            out = active[self.cache['rows']].mm(patch_matr)
+
+            oc = int(self.table_row_lengths[index])
+
+            if mode:
+                scale = torch.tensor(float(self.table_row_lengths[index]) /
+                                 self.out_channels).cuda()
+                out /= scale # scale up by fraction of rows useds
         else:
             # if there's no rows in the bucket, just use entire kernel.
             out = active.mm(patch_matr).cuda()
@@ -300,21 +299,18 @@ class ALSHConv2d(nn.Module):
         # N x O x (h2*w2)
         out.transpose_(0,1)
 
-        # N x O x h2 x w2 - proper output dims
-        #out = out.view(num_inputs, oc, h2, w2)
-
         #if self.bias is not None:
         #    if rows is not None:
         #        return (out + self.bias[:,rows].expand_as(out)), rows
         #    else:
         #        return (out + self.bias.expand_as(out)), rows
-        if rows.size() == torch.Size([0]):
+        if self.table_row_lengths[index] == 0:
             return out.view(num_inputs, oc, h2, w2), None
-        return out.view(num_inputs, oc, h2, w2), rows
+        return out.view(num_inputs, oc, h2, w2), self.cache['rows']
 
     def forward(self, input, mode, las=None):
-        if self.cache and mode:
-            self._rehash()
+        #if self.cache and mode:
+        #    self._rehash()
 
         if las is not None:
             return self._las_forward(input, mode, las)

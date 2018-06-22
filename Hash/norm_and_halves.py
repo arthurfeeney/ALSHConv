@@ -25,16 +25,32 @@ def append_norm_powers(x, m):
 
         return torch.cat((x, powers), 1)
 
+    elif x.dim() == 4: # mini-batch of images
+        batch_size = x.size()[0]
+        return append_norm_powers(x.view(batch_size, -1), m)
+
+
 def _append_halves(x, m):
     # x is a 1d array.
     halves = torch.Tensor(m).cuda().fill_(.5)
     return torch.cat((x, halves))
 
-def append_halves(x, m):
+def append_halves(x, m, kernel_size=None):
     if x.dim() == 1:
         return _append_halves(x, m)
     elif x.dim() == 2:
         num_cols = x.size()[1]
         halves = torch.empty(m, num_cols).cuda().fill_(.5)
         return torch.cat((x, halves), 0)
+
+    elif x.dim() == 4:
+        height, width = x.size()[2:]
+        depth = m / (kernel_size[0] * kernel_size[1])
+
+        halves = torch.empty(x.size()[0], depth,
+                             height, width).cuda().fill_(.5)
+
+        return torch.cat((x, halves), 1)
+
+
 

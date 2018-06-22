@@ -4,7 +4,7 @@ import torch.autograd as autograd
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from alsh_op import ALSHOp
+from Utility.alsh_op import ALSHOp
 
 class ALSHLinear(nn.Module):
     def __init__(self, input_size, num_nodes, hf, table_size, m, P, Q):
