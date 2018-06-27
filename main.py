@@ -8,7 +8,7 @@ import Net.alsh_net as ALSH
 import Net.alsh_conv_net as ALSHConv
 import Net.alsh_alex_net as ALSHAlex
 import Net.alsh_vgg_net as ALSHVGG
-import Net.simp_vgg_net as SimpVGG
+import Net.normal_vgg_net as NormVGG
 
 import time
 
@@ -30,32 +30,35 @@ def main():
     testloader = torch.utils.data.DataLoader(testset, batch_size=1,
                                              shuffle=False, num_workers=2)
 
-    net = ALSHConv.ALSHConvNet().cuda()
-    #net = ALSHVGG.ALSHVGGNet().cuda()
-    #net = SimpVGG.SimpVGGNet().cuda()
+    device = torch.device('cpu')
+
+    #net = ALSHConv.ALSHConvNet(device).to(device)
+
+    net = ALSHVGG.ALSHVGGNet(device).to(device)
+    #net = NormVGG.NormVGGNet().to(device)
 
     start = time.time()
 
-    train(net, trainloader, 1)
+    train(net, trainloader, 1, device)
 
     train_time = time.time() - start
 
-    correct, total = test(net, testloader)
+    #correct, total = test(net, testloader, device)
 
-    test_time = time.time() - start - train_time
+    #test_time = time.time() - start - train_time
 
-    total_time = time.time() - start
+    #total_time = time.time() - start
 
-    print( (correct / total) * 100)
+    #print( (correct / total) * 100)
 
-    print('times: ')
-    print('train: ', train_time)
-    print('test: ', test_time)
-    print('total: ', total_time)
+    #print('times: ')
+    #print('train: ', train_time)
+    #print('test: ', test_time)
+    #print('total: ', total_time)
 
 
 
-def train(net, trainloader, num_epochs):
+def train(net, trainloader, num_epochs, device=torch.device('cuda')):
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(
                     filter(lambda p: p.requires_grad, net.parameters()),
@@ -63,12 +66,14 @@ def train(net, trainloader, num_epochs):
 
     net.train()
 
+    start = time.time()
+
     for epoch in range(num_epochs):
         for i, data in enumerate(trainloader, 0):
 
             inputs, labels = data
-            inputs = inputs.cuda()
-            labels = labels.cuda()
+            inputs = inputs.to(device)
+            labels = labels.to(device)
 
             inputs.resize_(100, 3, 32, 32)
 
@@ -79,20 +84,31 @@ def train(net, trainloader, num_epochs):
 
             optimizer.step()
 
+            if i == 10:
+                break
+        break
         print('epoch: ', epoch)
 
-    print('training complete')
 
 
-def test(net, testloader):
+    end = time.time()
+
+    time_span = end - start
+
+    print('training complete: ', time_span)
+
+
+def test(net, testloader, device=torch.device('cuda')):
     correct = 0
     total = 0
+
     net.eval()
+
     with torch.no_grad():
         for i, data in enumerate(testloader, 0):
             inputs, labels = data
-            inputs = inputs.cuda()
-            labels = labels.cuda()
+            inputs = inputs.to(device)
+            labels = labels.to(device)
 
             inputs.resize_(1, 3, 32, 32)
 

@@ -135,12 +135,12 @@ def load_kernel(kernel_name, code, **kwargs):
         return kernel_code.get_function(kernel_name)
 
 
-def zero_fill_missing(x, i, dims):
+def zero_fill_missing(x, i, dims, device=torch.device('cuda')):
     r"""
     fills channels that weren't computed with zeros.
     """
     if i is None:
         return x
-    t = torch.empty(dims).cuda().fill_(0)
+    t = torch.empty(dims).to(device).fill_(0)
     t[:,i,:,:] = x[:,]
     return t

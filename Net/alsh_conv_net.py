@@ -12,45 +12,44 @@ from simp_conv2d import SimpConv2d
 
 
 class ALSHConvNet(nn.Module):
-    def __init__(self):
+    def __init__(self, device=torch.device('cuda')):
         super(ALSHConvNet, self).__init__()
 
-        self.h1 = StableDistribution(75 + 25, .001)
-        self.h2 = StableDistribution(400 + 25, .001)
-        self.h3 = StableDistribution(500 + 25, .001)
+        self.device=device
 
-        #self.l1 = F_ALSHConv2d(3, 16, 5, 1, 2, 1, False, self.h1, 3, 25,
-        #                     P=append_norm_powers, Q=append_halves)
-        self.l1 = nn.Conv2d(3, 16, 5, 1, 2, bias=False)
-        #self.l1 = SimpConv2d(3, 16, 5, 1, 2, False)
+        self.h1 = StableDistribution(75 + 25, .001, device=device)
+        self.h2 = StableDistribution(400 + 25, .001, device=device)
+        self.h3 = StableDistribution(500 + 25, .001, device=device)
+
+        self.l1 = F_ALSHConv2d(3, 16, 5, 1, 2, 1, False, self.h1, 3, 25,
+                             P=append_norm_powers, Q=append_halves, device=device)
+        #self.l1 = nn.Conv2d(3, 16, 5, 1, 2, bias=False)
         self.p1 = nn.MaxPool2d(2)
-        #self.l2 = F_ALSHConv2d(16, 20, 5, 1, 2, 1, False, self.h2, 3, 25,
-        #                    P=append_norm_powers, Q=append_halves)
-        self.l2 = nn.Conv2d(16, 20, 5, 1, 2, bias=False)
-        #self.l2 = SimpConv2d(16, 20, 5, 1, 2, False)
+        self.l2 = F_ALSHConv2d(16, 20, 5, 1, 2, 1, False, self.h2, 3, 25,
+                            P=append_norm_powers, Q=append_halves, device=device)
+        #self.l2 = nn.Conv2d(16, 20, 5, 1, 2, bias=False)
         self.p2 = nn.MaxPool2d(2)
-        #self.l3 = F_ALSHConv2d(20, 20, 5, 1, 2, 1, False, self.h3, 3, 25,
-        #                     P=append_norm_powers, Q=append_halves)
-        self.l3 = nn.Conv2d(20, 20, 5, 1, 2, bias=False)
-        #self.l3 = SimpConv2d(20, 20, 5, 1, 2, False)
+        self.l3 = F_ALSHConv2d(20, 20, 5, 1, 2, 1, False, self.h3, 3, 25,
+                             P=append_norm_powers, Q=append_halves, device=device)
+        #self.l3 = nn.Conv2d(20, 20, 5, 1, 2, bias=False)
         self.p3 = nn.MaxPool2d(2)
         self.out = nn.Linear(320, 10)
 
     def forward(self, x, mode=True):
         batch_size = x.size()[0]
-        #x, i= self.l1(x)
-        x    = self.l1(x)
+        x, i= self.l1(x)
+        #x    = self.l1(x)
         x    = F.relu(x)
         x    = self.p1(x)
-        #x, i = self.l2(x, i)
-        x    = self.l2(x)
+        x, i = self.l2(x, i)
+        #x    = self.l2(x)
         x    = F.relu(x)
         x    = self.p2(x)
-        #x, i = self.l3(x, i)
-        x    = self.l3(x)
+        x, i = self.l3(x, i)
+        #x    = self.l3(x)
         x    = F.relu(x)
 
-        #x = zero_fill_missing(x, i, (batch_size, 20, 8, 8))
+        x = zero_fill_missing(x, i, (batch_size, 20, 8, 8), self.device)
         x = self.p3(x)
 
         x = x.view(batch_size, -1)
