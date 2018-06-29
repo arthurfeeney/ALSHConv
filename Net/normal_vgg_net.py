@@ -15,45 +15,66 @@ class NormVGGNet(nn.Module):
     def __init__(self, device=torch.device('cuda')):
         super(NormVGGNet, self).__init__()
 
-        self.conv1 = nn.Conv2d(3, 64, 3, 1, 1, 1, bias=False)
-        self.conv2 = nn.Conv2d(64, 64, 3, 1, 1, 1, bias=False)
+        self.conv1 = nn.Conv2d(3, 64, 3, 1, 1, 1)
+        self.bn1   = nn.BatchNorm2d(64)
+        self.conv2 = nn.Conv2d(64, 64, 3, 1, 1, 1)
+        self.bn2   = nn.BatchNorm2d(64)
         self.pool1 = nn.MaxPool2d(2)
 
-        self.conv3 = nn.Conv2d(64, 128, 3, 1, 1, 1, bias=False)
-        self.conv4 = nn.Conv2d(128, 128, 3, 1, 1, 1, bias=False)
+        self.conv3 = nn.Conv2d(64, 128, 3, 1, 1, 1)
+        self.bn3   = nn.BatchNorm2d(128)
+        self.conv4 = nn.Conv2d(128, 128, 3, 1, 1, 1)
+        self.bn4   = nn.BatchNorm2d(128)
         self.pool2 = nn.MaxPool2d(2)
 
-        self.conv5 = nn.Conv2d(128, 256, 3, 1, 1, 1, bias=False)
-        self.conv6 = nn.Conv2d(256, 256, 3, 1, 1, 1, bias=False)
+        self.conv5 = nn.Conv2d(128, 256, 3, 1, 1, 1)
+        self.bn5   = nn.BatchNorm2d(256)
+        self.conv6 = nn.Conv2d(256, 256, 3, 1, 1, 1)
+        self.bn6   = nn.BatchNorm2d(256)
         self.pool3 = nn.MaxPool2d(2)
 
         self.fc7   = nn.Linear(4096, 512)
+        self.bn7   = nn.BatchNorm1d(512)
         self.fc8 = nn.Linear(512, 512)
+        self.bn8   = nn.BatchNorm1d(512)
 
         self.fc9 = nn.Linear(512, 10)
 
     def forward(self, x, mode=True):
         batch_size = x.size()[0]
         x = self.conv1(x)
+        x = self.bn1(x)
         x = F.relu(x)
         x = self.conv2(x)
+        x = self.bn2(x)
         x = F.relu(x)
         x = self.pool1(x)
+
         x = self.conv3(x)
+        x = self.bn3(x)
         x = F.relu(x)
         x = self.conv4(x)
-        x = self.pool2(x)
+        x = self.bn4(x)
         x = F.relu(x)
+        x = self.pool2(x)
+
         x = self.conv5(x)
+        x = self.bn5(x)
+        x = F.relu(x)
         x = self.conv6(x)
+        x = self.bn6(x)
         x = F.relu(x)
         x = self.pool3(x)
+
         x = x.view(batch_size, -1) # flatten each thing in batch
+
         x = self.fc7(x)
-        x = F.relu(x)
-        x = self.fc8(x)
+        x = self.bn7(x)
         x = F.relu(x)
 
+        x = self.fc8(x)
+        x = self.bn8(x)
+        x = F.relu(x)
 
         x = self.fc9(x)
 

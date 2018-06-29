@@ -9,13 +9,18 @@ import Net.alsh_conv_net as ALSHConv
 import Net.alsh_alex_net as ALSHAlex
 import Net.alsh_vgg_net as ALSHVGG
 import Net.normal_vgg_net as NormVGG
+import SingleCPUTests.standard_conv as std
 
 import time
 
+
+def init_net(m):
+    torch.nn.init.kaiming_normal(m.weight.data, nonlinearity='relu')
+    torch.nn.init.kaiming_normal(m.bias.data, nonlinearity='relu')
+
 def main():
     transform = transforms.Compose(
-        [#transforms.Resize((227,227)),
-         transforms.ToTensor(),
+        [transforms.ToTensor(),
          transforms.Normalize((.5,.5,.5), (.5,.5,.5))])
 
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
@@ -30,39 +35,41 @@ def main():
     testloader = torch.utils.data.DataLoader(testset, batch_size=1,
                                              shuffle=False, num_workers=2)
 
-    device = torch.device('cpu')
+    device = torch.device('cuda')
 
     #net = ALSHConv.ALSHConvNet(device).to(device)
+    #net = std.ManyFilterNet().to(device)
+    #net = ALSHVGG.ALSHVGGNet(device).to(device)
 
-    net = ALSHVGG.ALSHVGGNet(device).to(device)
-    #net = NormVGG.NormVGGNet().to(device)
+    net = NormVGG.NormVGGNet().to(device)
+    net.apply(init_net)
 
     start = time.time()
 
-    train(net, trainloader, 1, device)
+    train(net, trainloader, 200, device)
 
     train_time = time.time() - start
 
-    #correct, total = test(net, testloader, device)
+    correct, total = test(net, testloader, device)
+    #correct, total = monte_carlo_dropout_test(net, testloader, device=device)
 
-    #test_time = time.time() - start - train_time
+    test_time = time.time() - start - train_time
 
-    #total_time = time.time() - start
+    total_time = time.time() - start
 
-    #print( (correct / total) * 100)
+    print( (correct / total) * 100)
 
-    #print('times: ')
-    #print('train: ', train_time)
-    #print('test: ', test_time)
-    #print('total: ', total_time)
+    print('times: ')
+    print('train: ', train_time)
+    print('test: ', test_time)
+    print('total: ', total_time)
 
 
 
 def train(net, trainloader, num_epochs, device=torch.device('cuda')):
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(
-                    filter(lambda p: p.requires_grad, net.parameters()),
-                    lr=.001)
+    optimizer = torch.optim.SGD(net.parameters(), lr=.1, momentum=.9,
+                                weight_decay=.0001)
 
     net.train()
 
@@ -84,18 +91,10 @@ def train(net, trainloader, num_epochs, device=torch.device('cuda')):
 
             optimizer.step()
 
-            if i == 10:
-                break
-        break
+        adjust_learning_rate(.1, optimizer, epoch)
+
         print('epoch: ', epoch)
 
-
-
-    end = time.time()
-
-    time_span = end - start
-
-    print('training complete: ', time_span)
 
 
 def test(net, testloader, device=torch.device('cuda')):
@@ -118,6 +117,52 @@ def test(net, testloader, device=torch.device('cuda')):
             correct += (predicted == labels).sum().item()
 
     return correct, total
+
+def monte_carlo_test_phase(m):
+    if type(m) != torch.nn.Dropout2d:
+        m.eval()
+
+def monte_carlo_dropout_test(net, testloader, T, device=torch.device('cuda')):
+
+    r"""
+    used with Bayesian networks. Averages T outputs for each input.
+    """
+
+    correct = 0
+    total = 0
+
+    net.apply(monte_carlo_test_phase) # switch to test mode, except dropout!
+
+
+    with torch.no_grad():
+        for i, data in enumerate(testloader, 0):
+            inputs, labels = data
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            inputs.resize_(1, 3, 32, 32)
+
+            outputs = torch.Tensor([net(inputs) for _ in range(T)]).to(device)
+
+            final_output = outputs.sum(dim=0) / outputs.size()[0]
+
+            _, predicted = torch.max(final_output.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    return correct, total
+
+
+def adjust_learning_rate(learning_rate, optimizer, epoch):
+    """
+    Sets the learning rate to the initial LR decayed by 10 every 30 epochs
+    with batch size of 100, this is dividing learning_rate by 10 every
+    15k iterations.
+    """
+    lr = learning_rate * (0.1 ** (epoch // 30))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
 
 
 if __name__ == "__main__":

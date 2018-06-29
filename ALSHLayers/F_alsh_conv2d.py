@@ -8,6 +8,16 @@ from Utility.cp_utils import count_votes, rehash_alsh_table
 from torch.nn.modules.utils import _pair
 
 class ALSHConv(nn.Module):
+
+    def scale_kernels_under_U(self, kernels):
+        r"""
+        makes all rows, r, in kernels ||r|| <= U
+        """
+        U = .99
+        # get index of greatest magnitue kernel.
+        denom = kernels.norm(dim=1)
+        return U * kernels / denom
+
     def init_table(self, kernels, hash, P, m, table_size, out_channels,
                    device=torch.device('cuda')):
         self.table = torch.Tensor(table_size,
@@ -15,8 +25,10 @@ class ALSHConv(nn.Module):
         self.table_row_lengths = \
             torch.Tensor(table_size).to(device).long().fill_(0)
 
-        indices = \
-            hash(P(kernels, m, device).transpose(0,1),).view(-1).long().to(device)
+        kernel_under_U = self.scale_kernels_under_U(kernels)
+
+        indices = hash(P(kernel_under_U, m, device).transpose(0,1))
+        indices = indices.view(-1).long().to(device)
         indices.fmod_(table_size)
         indices.abs_()
 
@@ -30,9 +42,10 @@ class ALSHConv(nn.Module):
                      device=torch.device('cuda')):
         self.table_row_lengths[index] = 0
 
-        kernels = kernels[rows] # updated weights in last active set
+        kernels_under_U = self.scale_kernels_under_U(kernels[rows])
 
-        indices = hash(P(kernels, m, device).transpose(0,1), rows).view(-1).long()
+        indices = hash(P(kernels_under_U, m, device).transpose(0,1), rows)
+        indices = indices.view(-1).long().to(device)
         indices.fmod_(table_size)
         indices.abs_()
 
@@ -83,7 +96,6 @@ class ALSHConv(nn.Module):
 
         kernel = hash.a.view(1, d, kernel_size[0], kernel_size[1])
 
-
         if las is not None:
             las_and_last = \
                 torch.cat((las, torch.range(in_channels, d-1).long().to(device)))
@@ -91,13 +103,13 @@ class ALSHConv(nn.Module):
 
         input_Q = Q(input, m, kernel_size, device=device)
 
-
+        #input regions need to be unit vectors! DARN!
         dotted = F.conv2d(input_Q, kernel, stride=stride,
                           padding=padding, dilation=dilation)
 
         votes = torch.floor((dotted.view(-1) + hash.b) / hash.r)
 
-        return votes
+        return votes.long()
 
 
 class F_ALSHConv2d(nn.Conv2d, ALSHConv):
@@ -126,13 +138,20 @@ class F_ALSHConv2d(nn.Conv2d, ALSHConv):
         return rows.to(self.device)
 
     def forward(self, input, las=None):
+        if not self.training:
+            # if testing, just run through it, don't get active set!
+            return F.conv2d(input, self.weight, self.bias, self.stride,
+                            self.padding, self.dilation), None
+
         if self.training and self.rows is not None:
-            self.rehash_table(self.weight.to(self.device), self._hash, self.P,
+            if self.index == -1:
+                self.init_table(self.weight.to(self.device), self._hash, self.P,
+                                self.m, self._table_size, self.out_channels,
+                                device=self.device)
+            else:
+                self.rehash_table(self.weight.to(self.device), self._hash, self.P,
                               self.m, self._table_size, self.index, self.rows,
                               device=self.device)
-            #self.init_table(self.weight.to(self.device), self._hash, self.P,
-            #                self.m, self._table_size, self.out_channels,
-            #                device=self.device)
 
         if las is None:
             kernels = self.weight
@@ -147,6 +166,8 @@ class F_ALSHConv2d(nn.Conv2d, ALSHConv):
                                 self.dilation, las, device=self.device)
 
         if self.rows.size() == torch.Size([0]):
+            # if the bucket is empty, rehash everything.
+            self.index = -1
             self.rows = self.random_rows()
             self.active_set = kernels[self.rows]
 
@@ -155,9 +176,10 @@ class F_ALSHConv2d(nn.Conv2d, ALSHConv):
 
 
         # it may not be necessary to scale if still dropping at test time?
-        scale = torch.tensor(float(self.rows.size()[0]) /
-                             self.out_channels).to(self.device)
-        out /= scale
+        if self.training:
+            scale = torch.tensor(float(self.rows.size()[0]) /
+                                 self.out_channels).to(self.device)
+            out /= scale
 
         return out, self.rows
 

@@ -11,7 +11,7 @@ from simp_conv2d import SimpConv2d
 
 class Block(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
-                 padding, same=True, bias=False):
+                 padding, same=True, bias=True):
         super(Block, self).__init__()
 
         self.in_channels = in_channels,
@@ -31,15 +31,14 @@ class Block(nn.Module):
             self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size,
                                     stride*2, padding, bias=bias)
         self.bn2   = nn.BatchNorm2d(out_channels)
-        self.relu2 = nn.ReLU()
 
     def forward(self, x):
         x = self.conv1(x)
-        x = F.relu(x)
         x = self.bn1(x)
-        x = self.conv2(x)
         x = F.relu(x)
+        x = self.conv2(x)
         x = self.bn2(x)
+        x = F.relu(x)
         return x
 
 
@@ -48,11 +47,9 @@ class ResNet18(nn.Module):
         super(ResNet18, self).__init__()
 
         r"""
-
         the only difference between skips and links is stride. skips use stride 2
         to reduce dimension.
         """
-
 
         # 224x224 -> 112x112
         self.conv1 = nn.Conv2d(3, 64, 7, 2, 1)

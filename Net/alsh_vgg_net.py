@@ -44,9 +44,9 @@ class ALSHVGGNet(nn.Module):
                      #             device=device)
         self.pool2 = nn.MaxPool2d(2)
 
-        self.conv5 = F_ALSHConv2d(128, 256, 3, 1, 1, 1, False, self.h5, 2, 9,
-                                  P=append_norm_powers, Q=append_halves,
-                                  device=device)
+        self.conv5 = nn.Conv2d(128, 256, 3, 1, 1, 1, bias=False)#F_ALSHConv2d(128, 256, 3, 1, 1, 1, False, self.h5, 2, 9,
+                                  #P=append_norm_powers, Q=append_halves,
+                                  #device=device)
         self.conv6 = F_ALSHConv2d(256, 256, 3, 1, 1, 1, False, self.h6, 2, 9,
                                   P=append_norm_powers, Q=append_halves,
                                   device=device)
@@ -73,8 +73,9 @@ class ALSHVGGNet(nn.Module):
         x    = self.conv4(x)
         x    = self.pool2(x)
         x    = F.relu(x)
-        x, i = self.conv5(x)
-        x, i = self.conv6(x, i)
+        #x, i = self.conv5(x)
+        x    = self.conv5(x)
+        x, i = self.conv6(x)
         x    = F.relu(x)
         x    = self.pool3(x)
         x    = zero_fill_missing(x, i, (batch_size, 256, 4, 4),

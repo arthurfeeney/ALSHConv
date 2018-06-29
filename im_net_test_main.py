@@ -26,10 +26,17 @@ parser.add_argument('--print_freq', default=10, type=int, metavar='N')
 
 best_prec1 = 0
 
+def init_nets(m):
+    nn.init.kaiming_uniform(m.weight.data, non_linearity='relu')
+    nn.init.kaiming_uniform(m.bias.data, non_linearity='relu')
+
+
 def main():
     global args, best_prec1
 
     model = ResNet18().cuda()
+    model.apply(init_nets)
+
 
     args = parser.parse_args()
 
@@ -192,7 +199,8 @@ class AverageMeter(object):
 
 
 def adjust_learning_rate(optimizer, epoch):
-    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs
+    """
+    Sets the learning rate to the initial LR decayed by 10 every 30 epochs
     """
     lr = args.lr * (0.1 ** (epoch // 30))
     for param_group in optimizer.param_groups:
