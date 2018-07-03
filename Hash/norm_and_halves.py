@@ -23,6 +23,8 @@ def append_norm_powers(x, m, device=torch.device('cuda')):
             for j, x_n in enumerate(x_ns):
                 powers[j,i] = x_n**2**(i+1)
 
+        powers[powers == float('inf')] = 0
+
         return torch.cat((x, powers), 1)
 
     elif x.dim() == 4: # mini-batch of images

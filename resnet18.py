@@ -80,9 +80,9 @@ class ResNet18(nn.Module):
         self.link5 = nn.Conv2d(512, 512, 1, 1, 1)
 
         #7x7 -> 1x1
-        self.pool2 = nn.AvgPool2d(2)
+        self.pool2 = nn.AvgPool2d(7)
 
-        self.fc = nn.Linear(2048, 1000)
+        self.fc = nn.Linear(512, 1000)
 
 
     def forward(self, x):

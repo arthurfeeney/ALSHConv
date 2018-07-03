@@ -14,4 +14,5 @@ class StableDistribution():
 
     def __call__(self, x, las=None):
         dot = self.a @ x
-        return torch.floor((dot + self.b) / self.r).to(self.device)
+        x = torch.floor((dot + self.b) / self.r).to(self.device)
+        return x

@@ -34,11 +34,18 @@ __global__ void counts(long long* dst, long long* votes) {
 }
 '''
 
-def count_votes(votes, table_size):
+def count_votes(votes, table_size, device=torch.device('cuda')):
     n = votes.size()[0]
 
-    tallies = torch.empty(table_size).long().cuda().fill_(0)
+    tallies = torch.empty(table_size).long().to(device).fill_(0)
 
+    if device == torch.device('cpu'):
+        # if using cpu
+        for v in votes:
+            tallies[v.long() % table_size] += 1
+        return tallies
+
+    # if using GPU, you can obviously use handy kernel.
     with torch.cuda.device_of(votes):
         f = load_kernel('counts', _count_votes_kernel, n=n,
                         table_size=table_size)

@@ -27,8 +27,8 @@ parser.add_argument('--print_freq', default=10, type=int, metavar='N')
 best_prec1 = 0
 
 def init_nets(m):
-    nn.init.kaiming_uniform(m.weight.data, non_linearity='relu')
-    nn.init.kaiming_uniform(m.bias.data, non_linearity='relu')
+    if isinstance(m, nn.Conv2d):
+        nn.init.kaiming_uniform_(m.weight.data, non_linearity='relu')
 
 
 def main():

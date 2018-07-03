@@ -15,8 +15,8 @@ import time
 
 
 def init_net(m):
-    torch.nn.init.kaiming_normal(m.weight.data, nonlinearity='relu')
-    torch.nn.init.kaiming_normal(m.bias.data, nonlinearity='relu')
+    if isinstance(m, torch.nn.Conv2d):
+        torch.nn.init.kaiming_normal_(m.weight.data, nonlinearity='relu')
 
 def main():
     transform = transforms.Compose(
@@ -35,14 +35,14 @@ def main():
     testloader = torch.utils.data.DataLoader(testset, batch_size=1,
                                              shuffle=False, num_workers=2)
 
-    device = torch.device('cuda')
+    device = torch.device('cpu')
 
-    #net = ALSHConv.ALSHConvNet(device).to(device)
+    net = ALSHConv.ALSHConvNet(device).to(device)
     #net = std.ManyFilterNet().to(device)
     #net = ALSHVGG.ALSHVGGNet(device).to(device)
 
-    net = NormVGG.NormVGGNet().to(device)
-    net.apply(init_net)
+    #net = NormVGG.NormVGGNet().to(device)
+    #net.apply(init_net)
 
     start = time.time()
 

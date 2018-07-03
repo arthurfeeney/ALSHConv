@@ -17,20 +17,22 @@ class ALSHConvNet(nn.Module):
 
         self.device=device
 
-        self.h1 = StableDistribution(75 + 25, .001, device=device)
-        self.h2 = StableDistribution(400 + 25, .001, device=device)
-        self.h3 = StableDistribution(500 + 25, .001, device=device)
+        self.l1 = F_ALSHConv2d(3, 16, 5, 1, 2, 1, False, 6, StableDistribution, 2,
+                               .001, 25, P=append_norm_powers,
+                               Q=append_halves, device=device)
 
-        self.l1 = F_ALSHConv2d(3, 16, 5, 1, 2, 1, False, self.h1, 3, 25,
-                             P=append_norm_powers, Q=append_halves, device=device)
         #self.l1 = nn.Conv2d(3, 16, 5, 1, 2, bias=False)
         self.p1 = nn.MaxPool2d(2)
-        self.l2 = F_ALSHConv2d(16, 20, 5, 1, 2, 1, False, self.h2, 3, 25,
-                            P=append_norm_powers, Q=append_halves, device=device)
+        self.l2 = F_ALSHConv2d(16, 20, 5, 1, 2, 1, False, 6, StableDistribution, 2,
+                               .001, 25, P=append_norm_powers,
+                               Q=append_halves, device=device)
+
         #self.l2 = nn.Conv2d(16, 20, 5, 1, 2, bias=False)
         self.p2 = nn.MaxPool2d(2)
-        self.l3 = F_ALSHConv2d(20, 20, 5, 1, 2, 1, False, self.h3, 3, 25,
-                             P=append_norm_powers, Q=append_halves, device=device)
+        self.l3 = F_ALSHConv2d(20, 20, 5, 1, 2, 1, False, 10, StableDistribution, 3,
+                               .001, 25, P=append_norm_powers,
+                               Q=append_halves, device=device)
+
         #self.l3 = nn.Conv2d(20, 20, 5, 1, 2, bias=False)
         self.p3 = nn.MaxPool2d(2)
         self.out = nn.Linear(320, 10)
