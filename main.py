@@ -1,4 +1,3 @@
-
 import torch
 import torchvision # to get cifar10 data for testing
 import torchvision.transforms as transforms
@@ -7,9 +6,8 @@ import torch.optim as optim
 import Net.alsh_net as ALSH
 import Net.alsh_conv_net as ALSHConv
 import Net.alsh_alex_net as ALSHAlex
-import Net.alsh_vgg_net as ALSHVGG
+import Net.alsh_vgg_net2 as ALSHVGG
 import Net.normal_vgg_net as NormVGG
-import SingleCPUTests.standard_conv as std
 
 import time
 
@@ -23,13 +21,17 @@ def main():
         [transforms.ToTensor(),
          transforms.Normalize((.5,.5,.5), (.5,.5,.5))])
 
-    trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
+    trainset = torchvision.datasets.CIFAR10(
+                                root='/data/zhanglab/afeeney/cifar10/data',
+                                            train=True,
                                             download=True,
                                             transform=transform)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=100,
                                               shuffle=True, num_workers=2)
 
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False,
+    testset = torchvision.datasets.CIFAR10(
+                                root='/data/zhanglab/afeeney/cifar10/data',
+                                           train=False,
                                            download=True,
                                            transform=transform)
     testloader = torch.utils.data.DataLoader(testset, batch_size=1,
@@ -37,24 +39,25 @@ def main():
 
     device = torch.device('cpu')
 
-    net = ALSHConv.ALSHConvNet(device).to(device)
+    #net = ALSHConv.ALSHConvNet(device).to(device)
     #net = std.ManyFilterNet().to(device)
-    #net = ALSHVGG.ALSHVGGNet(device).to(device)
+    net = ALSHVGG.ALSHVGGNet(device).to(device)
 
     #net = NormVGG.NormVGGNet().to(device)
     #net.apply(init_net)
 
     start = time.time()
 
-    train(net, trainloader, 200, device)
+    train(net, trainloader, 1, device)
 
     train_time = time.time() - start
 
+    print('train time: ', train_time)
+
     correct, total = test(net, testloader, device)
-    #correct, total = monte_carlo_dropout_test(net, testloader, device=device)
 
     test_time = time.time() - start - train_time
-
+    
     total_time = time.time() - start
 
     print( (correct / total) * 100)
@@ -90,6 +93,7 @@ def train(net, trainloader, num_epochs, device=torch.device('cuda')):
             loss.backward()
 
             optimizer.step()
+
 
         adjust_learning_rate(.1, optimizer, epoch)
 
@@ -144,13 +148,7 @@ def monte_carlo_dropout_test(net, testloader, T, device=torch.device('cuda')):
 
             outputs = torch.Tensor([net(inputs) for _ in range(T)]).to(device)
 
-            final_output = outputs.sum(dim=0) / outputs.size()[0]
-
-            _, predicted = torch.max(final_output.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    return correct, total
+            final_output = outputs.sum(dim=0)
 
 
 def adjust_learning_rate(learning_rate, optimizer, epoch):
@@ -162,7 +160,6 @@ def adjust_learning_rate(learning_rate, optimizer, epoch):
     lr = learning_rate * (0.1 ** (epoch // 30))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
-
 
 
 if __name__ == "__main__":

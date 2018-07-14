@@ -1,4 +1,3 @@
-
 import torch.nn
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,14 +22,14 @@ class Block(nn.Module):
 
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size,
                                 stride, padding, bias=bias)
-        self.bn1   = nn.BatchNorm2d(out_channels)
+        #self.bn1   = nn.BatchNorm2d(out_channels)
         if same:
             self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size,
                                     stride, padding, bias=bias)
         else:
             self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size,
                                     stride*2, padding, bias=bias)
-        self.bn2   = nn.BatchNorm2d(out_channels)
+        #self.bn2   = nn.BatchNorm2d(out_channels)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -53,31 +52,33 @@ class ResNet18(nn.Module):
 
         # 224x224 -> 112x112
         self.conv1 = nn.Conv2d(3, 64, 7, 2, 1)
-        self.pool1 = nn.MaxPool2d(3, stride=2)
 
         # 112x112 -> 56x56
+        self.pool1 = nn.MaxPool2d(3, stride=2)
+
+        # 56x56 -> 56x56
         self.block1 = Block(64, 64, 3, 1, 1)
-        self.link1 = nn.Conv2d(64, 64, 1, 1, 1)
-        self.block2 = Block(64, 64, 3, 1, 1, same=False)
-        self.skip1 = nn.Conv2d(64, 64, 1, 2, 1)
+        self.link1 = nn.Conv2d(64, 64, 1, 1, 0)
+        self.block2 = Block(64, 64, 3, 1, 1)
+        self.link2 = nn.Conv2d(64, 64, 1, 1, 0)
 
         # 56x56 -> 28x28
         self.block3 = Block(64, 128, 3, 1, 1)
-        self.link2 = nn.Conv2d(128, 128, 1, 1, 1)
+        self.link3 = nn.Conv2d(64, 128, 1, 1, 0)
         self.block4 = Block(128, 128, 3, 1, 1, same=False)
-        self.skip2 = nn.Conv2d(128, 128, 1, 2, 1)
+        self.skip1 = nn.Conv2d(128, 128, 1, 2, 0)
 
         # 28x28 -> 14x14
         self.block5 = Block(128, 256, 3, 1, 1)
-        self.link3 = nn.Conv2d(256, 256, 1, 1, 1)
+        self.link4 = nn.Conv2d(128, 256, 1, 1, 0)
         self.block6 = Block(256, 256, 3, 1, 1, same=False)
-        self.skip3 = nn.Conv2d(256, 256, 1, 2, 1)
+        self.skip2 = nn.Conv2d(256, 256, 1, 2, 0)
 
         # 14x14 -> 7x7
         self.block7 = Block(256, 512, 3, 1, 1)
-        self.link4 = nn.Conv2d(512, 512, 1, 1, 1)
+        self.link5 = nn.Conv2d(256, 512, 1, 1, 0)
         self.block8 = Block(512, 512, 3, 1, 1, same=False)
-        self.link5 = nn.Conv2d(512, 512, 1, 1, 1)
+        self.skip3 = nn.Conv2d(512, 512, 1, 2, 0)
 
         #7x7 -> 1x1
         self.pool2 = nn.AvgPool2d(7)
@@ -91,13 +92,13 @@ class ResNet18(nn.Module):
         x = F.relu(x)
         x = self.pool1(x)
         x = self.block1(x) + self.link1(x)
-        x = self.block2(x) + self.skip1(x)
-        x = self.block3(x) + self.link2(x)
-        x = self.block4(x) + self.skip2(x)
-        x = self.block5(x) + self.link3(x)
-        x = self.block6(x) + self.skip3(x)
-        x = self.block7(x) + self.link4(x)
-        x = self.block8(x) + self.link5(x)
+        x = self.block2(x) + self.link2(x)
+        x = self.block3(x) + self.link3(x)
+        x = self.block4(x) + self.skip1(x)
+        x = self.block5(x) + self.link4(x)
+        x = self.block6(x) + self.skip2(x)
+        x = self.block7(x) + self.link5(x)
+        x = self.block8(x) + self.skip3(x)
         x = self.pool2(x)
         x = x.view(batch_size, -1)
         x = self.fc(x)

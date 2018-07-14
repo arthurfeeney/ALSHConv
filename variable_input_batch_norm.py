@@ -12,7 +12,6 @@ class F_BatchNorm2d(nn.Module):
         self.affine = affine
 
 
-
         self.weight = Parameter(torch.Tensor(num_features))
         self.bias = Parameter(torch.Tensor(num_featres))
 

@@ -1,7 +1,5 @@
 
 import torch
-import cupy
-from string import Template
 
 def _append_norm_powers(x, m, device=torch.device('cuda')):
     # x is just a 1d array

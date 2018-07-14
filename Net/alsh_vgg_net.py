@@ -10,6 +10,8 @@ from Hash.norm_and_halves import append_norm_powers, append_halves
 from Utility.cp_utils import zero_fill_missing
 from simp_conv2d import SimpConv2d
 
+from Hash.sign_random_projection import SignRandomProjection
+from Hash.sub_norm_and_zeros import append_sub_norm_powers, append_zeros
 
 class ALSHVGGNet(nn.Module):
     def __init__(self, device=torch.device('cuda')):
@@ -17,38 +19,18 @@ class ALSHVGGNet(nn.Module):
 
         self.device=device
 
-        # the first argument is just kkc + m for whichever conv its used with
-        self.h1 = StableDistribution(36,  .002, device=device)
-        self.h2 = StableDistribution(585,  .002, device=device)
-        self.h3 = StableDistribution(585,  .002, device=device)
-        self.h4 = StableDistribution(1161,  .002, device=device)
-        self.h5 = StableDistribution(1161,  .002, device=device)
-        self.h6 = StableDistribution(2313,  .002, device=device)
-        self.h7 = StableDistribution(2313,  .002, device=device)
-        self.h8 = StableDistribution(4617,  .002, device=device)
-
-
-        self.conv1 = nn.Conv2d(3, 64, 3, 1, 1, 1, bias=False)#F_ALSHConv2d(3, 64, 3, 1, 1, 1, False, self.h1, 5, 9,
-                     #             P=append_norm_powers, Q=append_halves,
-                     #             device=device)
-        self.conv2 = nn.Conv2d(64, 64, 3, 1, 1, 1, bias=False)#F_ALSHConv2d(64, 64, 3, 1, 1, 1, False, self.h2, 5, 9,
-                     #             P=append_norm_powers, Q=append_halves,
-                     #             device=device)
+        self.conv1 = nn.Conv2d(3, 64, 3, 1, 1, 1, bias=False)
+        self.conv2 = nn.Conv2d(64, 64, 3, 1, 1, 1, bias=False)
         self.pool1 = nn.MaxPool2d(2)
 
-        self.conv3 = nn.Conv2d(64, 128, 3, 1, 1, 1, bias=False)#F_ALSHConv2d(64, 128, 3, 1, 1, 1, False, self.h3, 5, 9,
-                     #             P=append_norm_powers, Q=append_halves,
-                     #             device=device)
-        self.conv4 = nn.Conv2d(128, 128, 3, 1, 1, 1, bias=False)#F_ALSHConv2d(128, 128, 3, 1, 1, 1, False, self.h4, 5, 9,
-                     #             P=append_norm_powers, Q=append_halves,
-                     #             device=device)
+        self.conv3 = nn.Conv2d(64, 128, 3, 1, 1, 1, bias=False)
+        self.conv4 = nn.Conv2d(128, 128, 3, 1, 1, 1, bias=False)
         self.pool2 = nn.MaxPool2d(2)
 
-        self.conv5 = nn.Conv2d(128, 256, 3, 1, 1, 1, bias=False)#F_ALSHConv2d(128, 256, 3, 1, 1, 1, False, self.h5, 2, 9,
-                                  #P=append_norm_powers, Q=append_halves,
-                                  #device=device)
-        self.conv6 = F_ALSHConv2d(256, 256, 3, 1, 1, 1, False, self.h6, 2, 9,
-                                  P=append_norm_powers, Q=append_halves,
+        self.conv5 = nn.Conv2d(128, 256, 3, 1, 1, 1, bias=False)
+        self.conv6 = F_ALSHConv2d(256, 256, 3, 1, 1, 1, False, 2,
+                                  SignRandomProjection, 1, 9, .999, 
+                                  P=append_sub_norm_powers, Q=append_zeros,
                                   device=device)
         self.pool3 = nn.MaxPool2d(2)
 
