@@ -34,15 +34,23 @@ class ALSHVGGNet(nn.Module):
         self.conv5 = nn.Conv2d(128, 256, 3, 1, 1, 1)
         self.bn5   = nn.BatchNorm2d(256)
 
-        self.conv6 = F_ALSHConv2d(256, 256, 3, 1, 1, 1, False, 2,
-                                  SignRandomProjection, 2, 9, .999, 
+        ''' 
+        self.conv6 = F_ALSHConv2d(256, 512, 3, 1, 1, 1, False, 5,
+                                  SignRandomProjection, 1, 9, .999, 
                                   P=append_sub_norm_powers, Q=append_zeros,
-                                  device=device)
+                                  device=device, bits=3)
+        '''
 
-        self.bn6   = nn.BatchNorm2d(256)
+        
+        self.conv6 = F_ALSHConv2d(256, 512, 3, 1, 1, 1, False, 5,
+                                  StableDistribution, 1, 9, .99,
+                                  P=append_norm_powers, Q=append_halves,
+                                  device=device, r=.1)
+        
+        self.bn6   = nn.BatchNorm2d(512)
         self.pool3 = nn.MaxPool2d(2)
 
-        self.fc7   = nn.Linear(4096, 512)
+        self.fc7   = nn.Linear(8192, 512)
         self.bn7   = nn.BatchNorm1d(512)
         self.fc8 = nn.Linear(512, 512)
         self.bn8   = nn.BatchNorm1d(512)
@@ -71,7 +79,7 @@ class ALSHVGGNet(nn.Module):
         x = self.bn5(x)
         x = F.relu(x)
         x, i = self.conv6(x)
-        x = zero_fill_missing(x, i, (batch_size, 256, 8, 8), 
+        x = zero_fill_missing(x, i, dims=(batch_size, 512, 8, 8), 
                               device=self.device)
         x = self.bn6(x)
         x = F.relu(x)

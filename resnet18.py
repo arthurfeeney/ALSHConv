@@ -22,14 +22,14 @@ class Block(nn.Module):
 
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size,
                                 stride, padding, bias=bias)
-        #self.bn1   = nn.BatchNorm2d(out_channels)
+        self.bn1   = nn.BatchNorm2d(out_channels)
         if same:
             self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size,
                                     stride, padding, bias=bias)
         else:
             self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size,
                                     stride*2, padding, bias=bias)
-        #self.bn2   = nn.BatchNorm2d(out_channels)
+        self.bn2   = nn.BatchNorm2d(out_channels)
 
     def forward(self, x):
         x = self.conv1(x)

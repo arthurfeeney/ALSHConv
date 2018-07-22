@@ -54,6 +54,7 @@ def main():
 
     print('train time: ', train_time)
 
+    '''
     correct, total = test(net, testloader, device)
 
     test_time = time.time() - start - train_time
@@ -66,8 +67,7 @@ def main():
     print('train: ', train_time)
     print('test: ', test_time)
     print('total: ', total_time)
-
-
+    '''
 
 def train(net, trainloader, num_epochs, device=torch.device('cuda')):
     criterion = torch.nn.CrossEntropyLoss()
@@ -94,11 +94,12 @@ def train(net, trainloader, num_epochs, device=torch.device('cuda')):
 
             optimizer.step()
 
-
+            if i == 10:
+                return 1
+ 
         adjust_learning_rate(.1, optimizer, epoch)
 
         print('epoch: ', epoch)
-
 
 
 def test(net, testloader, device=torch.device('cuda')):

@@ -29,11 +29,11 @@ class NormVGGNet(nn.Module):
 
         self.conv5 = nn.Conv2d(128, 256, 3, 1, 1, 1)
         self.bn5   = nn.BatchNorm2d(256)
-        self.conv6 = nn.Conv2d(256, 256, 3, 1, 1, 1)
-        self.bn6   = nn.BatchNorm2d(256)
+        self.conv6 = nn.Conv2d(256, 512, 3, 1, 1, 1)
+        self.bn6   = nn.BatchNorm2d(512)
         self.pool3 = nn.MaxPool2d(2)
 
-        self.fc7   = nn.Linear(4096, 512)
+        self.fc7   = nn.Linear(8192, 512)
         self.bn7   = nn.BatchNorm1d(512)
         self.fc8 = nn.Linear(512, 512)
         self.bn8   = nn.BatchNorm1d(512)

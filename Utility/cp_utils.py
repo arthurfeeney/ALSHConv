@@ -26,32 +26,49 @@ __global__ void counts(long long* dst, long long* votes) {
 
     int num_buckets = ${table_size};
 
+    int this_thread = blockIdx.x * blockDim.x + threadIdx.x;
+
     CUDA_KERNEL_LOOP(index, ${n}) {
-        dst[votes[index] % num_buckets] += 1;
+        dst[(this_thread * num_buckets) + (votes[index] % num_buckets)]++;
     }
 }
 '''
 
 def count_votes(votes, table_size, device=torch.device('cuda')):
-    n = votes.size(0)
+    r"""
+    counts up the votes for each bucket in the table.
+    Uses _count_votes_kernel if it is on device is cuda
+    returns tallies for each hash function.
+    """
+    num_hashes = votes.size(0)
+    num_votes_per_hash = votes.size(1)
 
-    tallies = torch.empty(table_size).long().to(device).fill_(0)
+    tallies_dim = torch.Size([num_hashes, table_size])
 
     if device == torch.device('cpu'):
-        # if using cpu
-        for v in votes:
-            tallies[v.long() % table_size] += 1
+        tallies = torch.empty(tallies_dim).long().to(device).fill_(0)
+        for h in range(num_hashes):
+            for vote in votes[h]:
+                tallies[h][vote.long() % table_size] += 1
         return tallies
 
-    # if using GPU, you can obviously use handy kernel.
-    with torch.cuda.device_of(votes):
-        f = load_kernel('counts', _count_votes_kernel, n=n,
-                        table_size=table_size)
-        f(block=(1, 1, 1),
-          grid=(1, 1, 1),
-          args=[tallies.data_ptr(), votes.data_ptr()],
-          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+    r"""
+    non-optimal. Uses separate kernel for each hash. 
+    """
+    tallies = torch.empty(tallies_dim).long().cuda()
+    for h in range(num_hashes):
+        with torch.cuda.device_of(votes):
+            v_per_thread = torch.empty(CUDA_NUM_THREADS, 
+                                       table_size).cuda().long().fill_(0)
+            
+            f = load_kernel('counts', _count_votes_kernel, 
+                            n=num_votes_per_hash, table_size=table_size)
+            f(block=(CUDA_NUM_THREADS, 1, 1),
+              grid=(1, 1, 1),
+              args=[v_per_thread.data_ptr(), votes[h].data_ptr()],
+              stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
 
+            tallies[h] = v_per_thread.sum(dim=0)
     return tallies
 
 _true_las_kernel = '''
@@ -139,53 +156,214 @@ _unique_kernel = '''
         i += blockDim.x * gridDim.x)
 
 extern "C"
-__global__ void unique(${Dtype}* dst, int*, long long* dst_indices, 
+__global__ void unique(${Dtype}* dst, unsigned char* dst_indices, 
                        ${Dtype}* src) 
 {
-    int contains_zero = 0;
+    CUDA_KERNEL_LOOP(idx, ${n}) {
+        
+        int i = 0;
+        while(dst[i] != src[idx] && i < ${n}) {
+            ++i;
+        }
 
-    for(int idx = 0; idx < ${n}; ++idx) {
-        if(src[idx] == 0) {
-            dst[idx] = 0;
-            dst_indices[idx] = idx;
-            break;
+        if(i == ${n}) {
+            dst[idx] = src[idx];
+            dst_indices[idx] = 1;
         }
     }
-
-    CUDA_KERNEL_LOOP(idx, ${n}) {
-        int i = 0;
-
-        while(dst[i] != src[idx] && i < ${n}) { 
-            i += 1
-        }
-        if(i == ${n}) {
-            dst[idx] = src[idx]
-            dst_indices[idx] = idx;
-        }
 }
 '''
 
-def get_unique(input, device=torch.device('cuda')):
-    n = input.size(0)
-
+def get_unique(input, sorted=False, device=torch.device('cuda')):
+    r"""
+    takes a tensor and device.
+    returns all the unique elements input. 
+    same as torch.unique().
+    """
     if device == torch.device('cpu'):
-        return input.unique()
+        return input.unique(sorted=sorted)
 
-    # this won't really work if there is more than one zero.
+    # GPU version is extremely inneficient. Just keeps tensor on device 
 
-    dst = torch.zeros(input.size()).to(input)
-    dst_fill_indices = torch.zeros(input.size()).long().cuda()
+    n = input.size(0)
+    Dtype = type_string(input)
+
+    dst = torch.empty(n).to(input).fill_(0)
+    dst_indices = torch.empty(n).cuda().byte().fill_(0)
+
+    zero_indices = (dst == 0).nonzero()
+
+    if zero_indices.numel() > 0:
+        dst_indices[zero_indices[0]] = 1
 
     with torch.cuda.device_of(input):
         f = load_kernel('unique', _unique_kernel, n=n, 
-                        Dtype=type_string(input))
+                        Dtype=Dtype)
         f(block=(1, 1, 1),
           grid=(1, 1, 1),
-          args=[dst.data_ptr(), zero_index.data_ptr(), input.data_ptr()],
+          args=[dst.data_ptr(), dst_indices.data_ptr(), input.data_ptr()],
           stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
-
+    
     return dst[dst_indices]
 
+
+def fill_powers_of_norms(input, m, sub, device=torch.device('cuda')):
+    if input.dim() == 0:
+        return fill_powers_of_norm(input, m, sub, device=device)
+    elif input.dim() == 1:
+        return fill_powers_of_norm_2d(input, m, sub, device=device)
+
+_power_fill_kernel = '''
+#define CUDA_KERNEL_LOOP(i, n)                          \
+    for(int i = blockIdx.x * blockDim.x + threadIdx.x;  \
+        i < (n);                                        \
+        i += blockDim.x * gridDim.x)
+
+extern "C"
+__global__ void power_fill_2d(float* dst, float* norms)
+{
+    // n is the number of norms. 
+    // m is the number of cols / append length.
+    
+    int append_len = ${m};
+
+    CUDA_KERNEL_LOOP(idx, ${n}) {
+        for (int col = blockIdx.y * blockDim.y + threadIdx.y; 
+             col < append_len; 
+             col += blockDim.y * gridDim.y) 
+        {
+            float exp = powf(2.0f, (float)col+1);
+            if(exp > 1000) {
+                dst[idx * append_len + col] = 0.5f; 
+            }
+            else {
+                dst[idx * append_len + col] = 0.5f - powf(norms[idx], exp);
+            }
+        }
+    }
+}
+
+extern "C"
+__global__ void no_sub_power_fill_2d(float* dst, float* norms)
+{
+    // n is the number of norms. 
+    // m is the number of cols / append length.
+    
+    int append_len = ${m};
+
+    CUDA_KERNEL_LOOP(idx, ${n}) {
+        for (int col = blockIdx.y * blockDim.y + threadIdx.y; 
+             col < append_len; 
+             col += blockDim.y * gridDim.y) 
+        {
+            float exp = powf(2.0f, (float)col+1);
+            if(exp > 1000) {
+                dst[idx * append_len + col] = 0.0f; 
+            }
+            else {
+                dst[idx * append_len + col] = powf(norms[idx], exp);
+            }
+        }
+    }
+}
+'''
+
+def fill_powers_of_norm_2d(input, m, sub, device=torch.device('cuda')):
+    if device == torch.device('cpu'):
+        powers = torch.empty(input.size(0), m).to(device)
+        for i in range(m):
+            for j, x_n in enumerate(input):
+                exp = 2**(i+1)
+                if sub: 
+                    if exp < 1000:
+                        powers[j, i] = .5 - x_n**exp
+                    else:
+                        powers[j,i] = .5
+                else:
+                    if exp < 1000:
+                        powers[j, i] = x_n**exp
+                    else:
+                        powers[j,i] = 0.0
+        return powers
+
+    with torch.cuda.device_of(input):
+        powers = torch.empty(input.size(0), m).to(device)
+        if sub:
+            f = load_kernel('power_fill_2d', _power_fill_kernel, m=m, 
+                            n=input.size(0))
+        else:
+            f = load_kernel('no_sub_power_fill_2d', _power_fill_kernel, m=m, 
+                            n=input.size(0))
+        f(block=(CUDA_NUM_THREADS // m, m, 1),
+          grid=(1, 1, 1),
+          args=[powers.data_ptr(), input.data_ptr()],
+          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+        
+        return powers
+
+_power_fill_1d_kernel = '''
+#define CUDA_KERNEL_LOOP(i, n)                          \
+    for(int i = blockIdx.x * blockDim.x + threadIdx.x;  \
+        i < (n);                                        \
+        i += blockDim.x * gridDim.x)
+
+
+extern "C"
+__global__ void power_fill_1d(float* dst, float* norm) 
+{
+    CUDA_KERNEL_LOOP(idx, ${m}) {
+        float exp = powf(2.0, (float)idx+1);
+        
+        if(exp > 1000) {
+            dst[idx] = 0.5f;
+        }
+        else {
+            dst[idx] = 0.5 - powf(*norm, exp);
+        }
+    }
+}
+
+extern "C"
+__global__ void no_sub_power_fill_1d(float* dst, float* norm) 
+{
+    CUDA_KERNEL_LOOP(idx, ${m}) {
+        float exp = powf(2.0, (float)idx+1);
+        
+        if(exp > 1000) {
+            dst[idx] = 0.0f;
+        }
+        else {
+            dst[idx] = powf(*norm, exp);
+        }
+    }
+}
+'''
+
+def fill_powers_of_norm(input, m, sub, device=torch.device('cuda')):
+    if device == torch.device('cpu'):
+        if sub:
+            powers = \
+                torch.Tensor([.5 - input**2**(i+1) for i in range(m)])    
+        else:
+            powers = torch.Tensor([input**2**(i+1) for i in range(m)])    
+        return power.to(device)
+ 
+    with torch.cuda.device_of(input):
+        powers = torch.empty(m).to(device)
+        
+        if sub:
+            f = load_kernel('power_fill_1d', _power_fill_1d_kernel, m=m)
+        else:
+            f = load_kernel('no_sub_power_fill_1d', _power_fill_1d_kernel, 
+                            m=m)
+
+        f(block=(CUDA_NUM_THREADS, 1, 1),
+          grid=(1, 1, 1),
+          args=[powers.data_ptr(), input.data_ptr()],
+          stream=Stream(ptr=torch.cuda.current_stream().cuda_stream))
+
+        return powers
+         
 
 @cupy.util.memoize(for_each_device=True)
 def load_kernel(kernel_name, code, **kwargs):
