@@ -1,21 +1,23 @@
-
 import torch.nn
 import torch.nn as nn
 import torch.nn.functional as F
-from Hash.stable_distribution import StableDistribution
-from ALSHLayers.alsh_linear import ALSHLinear
-from ALSHLayers.alsh_conv2d import ALSHConv2d
-from ALSHLayers.F_alsh_conv2d import F_ALSHConv2d
-from Hash.norm_and_halves import append_norm_powers, append_halves
-from Utility.cp_utils import zero_fill_missing
-from simp_conv2d import SimpConv2d
+import torchvision.transforms as transforms
 
-from Hash.sign_random_projection import SignRandomProjection
-from Hash.sub_norm_and_zeros import append_sub_norm_powers, append_zeros
+from LSH.multi_hash_srp import MultiHash_SRP
 
-class ALSHVGGNet(nn.Module):
+def zero_fill_missing(x, i, dims, device=torch.device('cuda')):
+    r"""
+    fills channels that weren't computed with zeros.
+    """
+    if i is None:
+        return x
+    t = torch.empty(dims).to(device).fill_(0)
+    t[:,i,:,:] = x[:,]
+    return t
+
+class VGG9Net(nn.Module):
     def __init__(self, device=torch.device('cuda')):
-        super(ALSHVGGNet, self).__init__()
+        super(VGG9Net, self).__init__()
 
         self.device = device
     
@@ -33,32 +35,22 @@ class ALSHVGGNet(nn.Module):
 
         self.conv5 = nn.Conv2d(128, 256, 3, 1, 1, 1)
         self.bn5   = nn.BatchNorm2d(256)
-
-        ''' 
-        self.conv6 = F_ALSHConv2d(256, 512, 3, 1, 1, 1, False, 5,
-                                  SignRandomProjection, 1, 9, .999, 
-                                  P=append_sub_norm_powers, Q=append_zeros,
-                                  device=device, bits=3)
-        '''
-
-        
-        self.conv6 = F_ALSHConv2d(256, 512, 3, 1, 1, 1, False, 5,
-                                  StableDistribution, 1, 9, .99,
-                                  P=append_norm_powers, Q=append_halves,
-                                  device=device, r=.1)
+    
+        self.conv6 = nn.Conv2d(256, 512, 3, 1, 1, 1)
         
         self.bn6   = nn.BatchNorm2d(512)
         self.pool3 = nn.MaxPool2d(2)
 
         self.fc7   = nn.Linear(8192, 512)
         self.bn7   = nn.BatchNorm1d(512)
-        self.fc8 = nn.Linear(512, 512)
+        self.fc8   = nn.Linear(512, 512)
         self.bn8   = nn.BatchNorm1d(512)
 
         self.fc9 = nn.Linear(512, 10)
 
-    def forward(self, x, mode=True):
+    def forward(self, x):
         batch_size = x.size()[0]
+
         x = self.conv1(x)
         x = self.bn1(x)
         x = F.relu(x)
@@ -78,9 +70,7 @@ class ALSHVGGNet(nn.Module):
         x = self.conv5(x)
         x = self.bn5(x)
         x = F.relu(x)
-        x, i = self.conv6(x)
-        x = zero_fill_missing(x, i, dims=(batch_size, 512, 8, 8), 
-                              device=self.device)
+        x = self.conv6(x)
         x = self.bn6(x)
         x = F.relu(x)
         x = self.pool3(x)
