@@ -15,43 +15,53 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         alsh_dim = in_channels * kernel_size * kernel_size
 
         self.init_ALSH(L, max_bits, which_hash, hash_init_params, K, 
-                       alsh_dim+2, device='cpu')  
+                       alsh_dim+2, out_channels, device=device)  
 
-        self.fill_table(self.weight)
+        #self.fill_table(self.weight)
 
         self.cache = None
 
         self.device = device
 
 
-    def forward_variant(self, x):
+    def ALSH_mode(self):
+        self.fill_table(self.weight)
+
+
+    def forward(self, x, LAS):
+        r'''
+        trains regularly, prunes during inference. 
+        '''
         if not self.training:
-            r'''
-            prunes during inference. 
-            '''
-            self.forward(x)
+            return self.forward2(x, LAS)
         else:
-            return nn.functional.conv2d(x, self.weight, self.bias,
+            return (nn.functional.conv2d(x, self.weight, self.bias,
                                         self.stride, self.padding, 
-                                        self.dilation)
+                                        self.dilation), None)
 
     
-    def forward(self, x):
-        if self.cache is not None and self.training:
-            active_kernels, active_set, table_indices = self.cache
-            self.refill(active_kernels, active_set, table_indices)
+    def forward2(self, x, LAS):
+        #if self.cache is not None and self.training:
+        #    active_kernels, active_set, table_indices = self.cache
+        #    self.refill(active_kernels, active_set, table_indices)
 
         AS, ti = self.get_active_set(x, self.kernel_size[0], self.stride, 
                                      self.padding, self.dilation) 
 
-        AK = self.weight[AS]
+        #AK = self.weight[AS]
+        if LAS is None:
+            AK = self.weight[AS]
+        else:
+            AK = self.weight[AS][:,LAS]
+
+        #print(AK.size())
 
         output = nn.functional.conv2d(x, 
                                       AK, self.bias[AS], 
                                       self.stride, self.padding, 
                                       self.dilation)
 
-        self.cache = AK, AS, ti
+        #self.cache = AK, AS, ti
 
         #output[output < 0.05] = 0
         

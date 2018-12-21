@@ -1,6 +1,7 @@
 import torch
 import torchvision # to get cifar10 data for testing
 import torchvision.transforms as transforms
+import torchvision.models as models
 
 import torch.optim as optim
 import Net.alsh_vgg9 as ALSHVGG9
@@ -21,15 +22,17 @@ def set_ALSH_mode(m):
 
 def main():
     transform = transforms.Compose(
-        [transforms.ToTensor(),
-         transforms.Normalize((0,0,0), (.5,.5,.5))])
+        [transforms.Resize((224, 224)),
+         transforms.ToTensor(),
+         transforms.Normalize(mean=(0.485,0.456,0.406), 
+                              std=(0.229,0.224,0.225))])
 
     trainset = torchvision.datasets.CIFAR10(
                                 root='./Data/cifar-10',
                                             train=True,
                                             download=True,
                                             transform=transform)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=100,
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=10,
                                               shuffle=True, num_workers=2)
 
     testset = torchvision.datasets.CIFAR10(
@@ -37,27 +40,39 @@ def main():
                                            train=False,
                                            download=True,
                                            transform=transform)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=100,
+    testloader = torch.utils.data.DataLoader(testset, batch_size=10,
                                              shuffle=True, num_workers=2)
 
     device = torch.device('cpu')
 
-    net = ALSHVGG9.ALSHVGGNet(device)#.to(device)
-    #net = ALSHVGG9_2.ALSHVGGNet(device)#.to(device)
-    #net = VGG9.VGG9Net(device).to(device)
+    net = models.vgg16_bn(pretrained=True)
 
-    net.apply(init_net)
+
+
+    #
+    # Transfer Learning - retrain vgg16 trained on imagenet for use
+    # with CIFAR10
+    #
 
     start = time.time()
 
+    net.train()
     train(net, trainloader, 1, device)
-
+    
     train_time = time.time() - start
-
     print('train time: ', train_time)
 
-    net.apply(set_ALSH_mode)
 
+    #
+    # Save the model
+    # 
+    torch.save(net.state_dict(), 'CIFAR10_Models/vgg16_bn') 
+
+
+    #
+    # Evaluate model on test dataset
+    #
+    net.eval()
     correct, total = test(net, testloader, device)
     test_time = time.time() - start - train_time
     
@@ -67,6 +82,9 @@ def main():
     print('train: ', train_time)
     print('test: ', test_time)
     print('total: ', total_time)
+
+# END main
+
 
 def train(net, trainloader, num_epochs, device=torch.device('cuda')):
     criterion = torch.nn.CrossEntropyLoss()
@@ -84,7 +102,7 @@ def train(net, trainloader, num_epochs, device=torch.device('cuda')):
             inputs = inputs.to(device)
             labels = labels.to(device)
 
-            inputs.resize_(100, 3, 32, 32)
+            inputs.resize_(10, 3, 224, 224)
 
             optimizer.zero_grad()
             outputs = net(inputs)

@@ -54,7 +54,9 @@ class MultiHash_SRP:
         r"""
         Uses SRP on the rows a matrix.
         """
+        # N x num_bits
         bits = (torch.mm(matr, self.a) > 0).float()
+
         return (bits * self.bit_mask).sum(1).view(-1).long()
 
 
@@ -73,10 +75,12 @@ class MultiHash_SRP:
         hash = (bits * self.bit_mask).sum(2)
 
         # mode not defined for torch.cuda.tensor 
-        return hash.view(-1).mode()[0].long()
+        mode = hash.view(-1).mode()[0].long()
+
+        return mode
 
 
-    def query(self, input, m=2, **kwargs):
+    def query(self, input, **kwargs):
         r'''
         applies Q to input and hashes. 
         If input object has dim == 4, kwargs should contaion stride,
@@ -91,16 +95,5 @@ class MultiHash_SRP:
         assert input.dim() == 2, \
             "MultiHash_SRP.pre. Input must be dim 2."
         return self.hash_matr(self.P_rows(input))
-
-
-
-
-
-
-
-
-
-
-
 
 

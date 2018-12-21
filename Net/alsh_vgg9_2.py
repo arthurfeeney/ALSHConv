@@ -9,6 +9,8 @@ from Conv.alsh_conv_2d import ALSHConv2d
 
 from LSH.multi_hash_srp import MultiHash_SRP
 
+from variable_input_batch_norm import F_BatchNorm2d
+
 def zero_fill_missing(x, i, dims, device=torch.device('cuda')):
     r"""
     fills channels that weren't computed with zeros.
@@ -37,11 +39,14 @@ class ALSHVGGNet(nn.Module):
         self.bn4   = nn.BatchNorm2d(128)
         self.pool2 = nn.MaxPool2d(2)
 
-        self.conv5 = nn.Conv2d(128, 256, 3, 1, 1, 1)
-        self.bn5   = nn.BatchNorm2d(256)
+
+        # 256 x 8x8
+        self.conv5 = ALSHConv2d(128, 256, 3, 1, 1, 1, True, MultiHash_SRP, {},
+                                3, 2, 2**3)
+        self.bn5   = F_BatchNorm2d(256)
     
         self.conv6 = ALSHConv2d(256, 512, 3, 1, 1, 1, True, MultiHash_SRP, {},
-                                4, 6, 2**4)
+                                5, 2, 2**5)
         
         self.bn6   = nn.BatchNorm2d(512)
         self.pool3 = nn.MaxPool2d(2)
@@ -58,41 +63,39 @@ class ALSHVGGNet(nn.Module):
 
         x = self.conv1(x)
         x = self.bn1(x)
-        x = F.relu(x)
+        x = F.leaky_relu(x)
         x = self.conv2(x)
         x = self.bn2(x)
-        x = F.relu(x)
+        x = F.leaky_relu(x)
         x = self.pool1(x)
 
         x = self.conv3(x)
         x = self.bn3(x)
-        x = F.relu(x)
+        x = F.leaky_relu(x)
         x = self.conv4(x)
         x = self.bn4(x)
-        x = F.relu(x)
+        x = F.leaky_relu(x)
         x = self.pool2(x)
 
-        x = self.conv5(x)
-        x = self.bn5(x)
-        x = F.relu(x)
-        x, i = self.conv6(x, LAS=None)
+        x, i = self.conv5(x, LAS=None)
+        #x = zero_fill_missing(x, i, (batch_size, 256, 8, 8), device=self.device)
+        x = self.bn5(x, LAS=i)
+        x = F.leaky_relu(x)
+        x, i = self.conv6(x, LAS=i)
         x = zero_fill_missing(x, i, (batch_size, 512, 8, 8), device=self.device)
-
-        #QU.print_mean_feature_map(x)
-
         x = self.bn6(x)
-        x = F.relu(x)
+        x = F.leaky_relu(x)
         x = self.pool3(x)
 
         x = x.view(batch_size, -1) # flatten each thing in batch
 
         x = self.fc7(x)
         x = self.bn7(x)
-        x = F.relu(x)
+        x = F.leaky_relu(x)
 
         x = self.fc8(x)
         x = self.bn8(x)
-        x = F.relu(x)
+        x = F.leaky_relu(x)
 
         x = self.fc9(x)
 

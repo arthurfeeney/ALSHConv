@@ -3,9 +3,9 @@ import torch
 import collections
 from statistics import mode
 
-class TablesCPU:
+class TablesGPU:
     def __init__(self, num_tables, table_size, which_hash,
-                 hash_init_params, num_hashes, dim):
+                 hash_init_params, num_hashes, dim, num_filters):
         r"""
         These tables are intended for ALSH on a cpu.
 
@@ -23,16 +23,16 @@ class TablesCPU:
         self.table_size = table_size
         self.num_hashes = num_hashes
         self.dim = dim
+        self.num_filters = num_filters
 
         t = range(num_tables)
         self.hashes = [which_hash(num_hashes,dim,hash_init_params) for _ in t]
         # tables does not contain keys. Only values.
-        self.tables = [ [ [] for _ in range(table_size)] for _ in t]
-
+        self.tables = torch.zeros(num_tables, table_size, num_filters).byte()
+        
 
     def get(self, key, **kwargs):
         return [hash.query(key, **kwargs) % self.table_size for hash in self.hashes]
-
 
     def put(self, key, **kwargs):
         return [hash.pre(key, **kwargs) % self.table_size for hash in self.hashes]
@@ -43,7 +43,7 @@ class TablesCPU:
         x must be some vector type with a length == self.dim
         This function inserts x into each table in self.tables.
         """
-        rows = self.pre(key)
+        rows = self.get(key)
         for ti in torch.arange(0, self.num_tables):
             self.tables[ti][rows[ti]].append(value)
 
@@ -61,7 +61,7 @@ class TablesCPU:
         # can distribute outer loop for each table
         for ti in torch.arange(0, self.num_tables):
             for row in torch.arange(0, len(values)):
-                self.tables[ti][rows[ti][row]].append(int(values[row]))
+                self.tables[ti][rows[ti][row]][values[row]] = 1
 
 
     def get_query_rows(self, q):
@@ -79,7 +79,7 @@ class TablesCPU:
         [1,2,3] clears rows 1, 2, and 3 from tables 0, 1, and 2
         """
         for ti in torch.arange(0, self.num_tables):
-            self.tables[ti][row_indices[ti]] = []
+            self.tables[ti][row_indices[ti]].fill_(0)
 
 
 
