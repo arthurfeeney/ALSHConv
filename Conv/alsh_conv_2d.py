@@ -1,7 +1,17 @@
 
-
+import torch
 import torch.nn as nn
 from Conv.alsh_conv import ALSHConv
+
+def zero_fill_missing(x, i, dims, device=torch.device('cuda')):
+    r"""
+    fills channels that weren't computed with zeros.
+    """
+    if i is None:
+        return x
+    t = torch.empty(dims).to(device).fill_(0)
+    t[:,i,:,:] = x[:,]
+    return t
 
 class ALSHConv2d(nn.Conv2d, ALSHConv):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
@@ -28,7 +38,7 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         self.fill_table(self.weight)
 
 
-    def forward(self, x, LAS):
+    def forward(self, x, LAS=None):
         r'''
         trains regularly, prunes during inference. 
         '''
@@ -64,5 +74,9 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         #self.cache = AK, AS, ti
 
         #output[output < 0.05] = 0
-        
-        return output, AS
+
+        h, w = output.size()[2:]
+
+        out_dims = (x.size(0), self.out_channels, h, w)
+
+        return zero_fill_missing(output, AS, out_dims, self.device)  #, AS

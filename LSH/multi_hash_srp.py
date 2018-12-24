@@ -75,9 +75,10 @@ class MultiHash_SRP:
         hash = (bits * self.bit_mask).sum(2)
 
         # mode not defined for torch.cuda.tensor 
-        mode = hash.view(-1).mode()[0].long()
+        #mode = hash.view(-1).unique().long()
+        #print(mode)
 
-        return mode
+        return hash
 
 
     def query(self, input, **kwargs):

@@ -28,10 +28,10 @@ class TablesCPU:
         self.hashes = [which_hash(num_hashes,dim,hash_init_params) for _ in t]
         # tables does not contain keys. Only values.
         self.tables = [ [ [] for _ in range(table_size)] for _ in t]
-
+        #self.tables = [ [ torch.Tensor([]).long() for _ in range(table_size)] for _ in t]
 
     def get(self, key, **kwargs):
-        return [hash.query(key, **kwargs) % self.table_size for hash in self.hashes]
+        return torch.stack([hash.query(key, **kwargs) % self.table_size for hash in self.hashes])
 
 
     def put(self, key, **kwargs):
@@ -62,7 +62,8 @@ class TablesCPU:
         for ti in torch.arange(0, self.num_tables):
             for row in torch.arange(0, len(values)):
                 self.tables[ti][rows[ti][row]].append(int(values[row]))
-
+                #self.tables[ti][rows[ti][row]] = \
+                #    torch.cat((self.tables[ti][rows[ti][row]], torch.Tensor([values[row]]).long()))
 
     def get_query_rows(self, q):
         indices = self._get(q)
@@ -80,6 +81,7 @@ class TablesCPU:
         """
         for ti in torch.arange(0, self.num_tables):
             self.tables[ti][row_indices[ti]] = []
+            #self.tables[ti][row_indices[ti]] = torch.Tensor([]).long() 
 
 
 
