@@ -31,7 +31,7 @@ def main():
     transform = transforms.Compose(
         [transforms.Resize((224, 224)),
          transforms.ToTensor(),
-         transforms.Normalize(mean=(0.485,0.456,0.406), 
+         transforms.Normalize(mean=(0.485,0.456,0.406),
                               std=(0.229,0.224,0.225))])
 
     trainset = torchvision.datasets.CIFAR10(
@@ -54,15 +54,15 @@ def main():
 
     #net = models.vgg16_bn(pretrained=True)
     #net.classifier[-1] = nn.Linear(4096, 10)
-    
-    
+
+
     net = models.squeezenet1_1(pretrained=True)
     net.num_classes=10
     net.classifier[1] = nn.Conv2d(512, 10, kernel_size=1, stride=1)
 
-    ftr_weight = net.features[-1].expand3x3.weight 
-    repl = Conv.ALSHConv2d(64, 256, 3, 1, 1, 1, True, MultiHash_SRP, {}, 
-                           3, 2, 2**3) 
+    ftr_weight = net.features[-1].expand3x3.weight
+    repl = Conv.ALSHConv2d(64, 256, 3, 1, 1, 1, True, MultiHash_SRP, {},
+                           2, 4, 2**3)
     repl.weight = ftr_weight
     net.features[-1].expand3x3 = repl
     net.apply(set_ALSH_mode)
@@ -75,18 +75,18 @@ def main():
     # Transfer Learning with CIFAR10
     #
     start = time.time()
-    
+
     #net.classifier.train()
     #train(net, trainloader, 1, device)
-    
+
     train_time = time.time() - start
     print('train time: ', train_time)
 
 
     #
     # Save the model
-    # 
-    #torch.save(net.state_dict(), 'CIFAR10_Models/vgg16_bn') 
+    #
+    #torch.save(net.state_dict(), 'CIFAR10_Models/vgg16_bn')
 
 
     #
@@ -97,7 +97,7 @@ def main():
     net.eval()
     correct, total = test(net, testloader, device)
     test_time = time.time() - start - train_time
-    
+
     total_time = time.time() - start
     print( (correct / total) * 100)
     print('times: ')
@@ -137,7 +137,7 @@ def train(net, trainloader, num_epochs, device=torch.device('cuda')):
                 return 1
                 print('epoch: ' + str(epoch) + 'finished iteration: ' + str(i))
 
- 
+
         adjust_learning_rate(.1, optimizer, epoch)
 
         print('epoch: ', epoch)

@@ -1,5 +1,6 @@
 
 import torch
+import torch.nn as nn
 import collections
 from statistics import mode
 
@@ -50,18 +51,22 @@ class TablesCPU:
 
     def insert_data(self, keys, values):
         r"""
-        inserts a sequence of values into tables based on keys. 
+        inserts a sequence of values into tables based on keys.
         keys[i] is the key for values[i]
         For this application, only values need to be stored in the hash table.
-        They work as references to the keys. 
+        They work as references to the keys.
         """
 
         rows = self.put(keys)
-        
+
+
         # can distribute outer loop for each table
-        for ti in torch.arange(0, self.num_tables):
-            for row in torch.arange(0, len(values)):
-                self.tables[ti][rows[ti][row]].append(int(values[row]))
+        for ti in torch.arange(0, self.num_tables).long():
+            #for val in values:#torch.arange(0, len(values)):
+            for row, val in zip(rows[ti], values):
+                #print(len(rows))
+                #print(row)
+                self.tables[ti][row].append(int(val))
                 #self.tables[ti][rows[ti][row]] = \
                 #    torch.cat((self.tables[ti][rows[ti][row]], torch.Tensor([values[row]]).long()))
 
@@ -79,9 +84,11 @@ class TablesCPU:
         row_indices[0] is the index of the row to clear in the first table.
         [1,2,3] clears rows 1, 2, and 3 from tables 0, 1, and 2
         """
-        for ti in torch.arange(0, self.num_tables):
-            self.tables[ti][row_indices[ti]] = []
-            #self.tables[ti][row_indices[ti]] = torch.Tensor([]).long() 
+        for ti in torch.arange(0, self.num_tables).long():
+            for row in row_indices[ti]:
+                for r in row.long():
+                    self.tables[ti][r] = []
+            #self.tables[ti][row_indices[ti]] = torch.Tensor([]).long()
 
 
 
