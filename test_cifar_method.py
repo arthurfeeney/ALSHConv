@@ -21,16 +21,33 @@ best_prec1 = 0
 best_prec5 = 0
 
 parser = argparse.ArgumentParser(description='arguments for CIFAR validation')
-parser.add_argument('--model', default=0, type=int, metavar='N', help='0=squeezenet, 1=vgg16_bn')
+parser.add_argument('model_path', metavar='DIR', help='path to load model')
+parser.add_argument('--model_name', type=str, help='name of the model to load')
+parser.add_argument('--model', default=0, type=int, metavar='N',
+                    help='0=squeezenet, 1=vgg16_bn')
 parser.add_argument('--workers', default=2, type=int, metavar='N')
 parser.add_argument('--print_frequency', default=100, type=int, metavar='N')
 parser.add_argument('--epochs', default=1, type=int, metavar='N')
 parser.add_argument('--batch_size', default=100, type=int, metavar='N')
-parser.add_argument('--lr', '--learning_rate', default=0.1, type=float, metavar='LR')
+parser.add_argument('--lr', '--learning_rate', default=0.1, type=float,
+                    metavar='LR')
 parser.add_argument('--decay_coef', default=30, type=int, metavar='N')
 parser.add_argument('--ten', default=True, type=bool,
                     help='if True, it will use CIFAR10, if False, CIFAR100')
 
+def replace_conv(model, idx):
+    if isinstance(model.features[idx], models.squeezenet.Fire):
+        #model.features[idx].squeeze =  Conv.ALSHConv2d.build(
+        #    model.features[idx].squeeze, MultiHash_SRP, {}, 5, 4, 2**5)
+        model.features[idx].expand1x1 = Conv.ALSHConv2d.build(
+            model.features[idx].expand1x1, MultiHash_SRP, {}, 5, 4, 2**5)
+        model.features[idx].expand3x3 = Conv.ALSHConv2d.build(
+            model.features[idx].expand3x3, MultiHash_SRP, {}, 5, 4, 2**5)
+
+def fix(m):
+    if isinstance(m, Conv.ALSHConv2d):
+        m.fix()
+        m = m.cuda()
 
 def main():
     ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -38,15 +55,16 @@ def main():
 
     args = parser.parse_args()
 
-    if args.model == 0:
-        model = models.squeezenet1_1(pretrained=True)
-        model.num_classes=10 if args.ten else 100
-        model.classifier[1] = nn.Conv2d(512, model.num_classes, kernel_size=1,
-                                        stride=1)
-    elif args.model == 1:
-        model = models.vgg16_bn(pretrained=True)
-        model.num_classes=10 if args.ten else 100
-        model.classifier[-1] = nn.Linear(4096, model.num_classes)
+    model = sqz_cifar() if args.model == 0 else vgg_cifar()
+    model = torch.load(args.model_path + args.model_name)
+    model = model.module.cpu()
+
+    #replace_conv(model, -1)
+    #replace_conv(model, -2)
+    #replace_conv(model, -3)
+    #replace_conv(model, -4)
+
+    model.apply(fix)
 
     train_sampler = None
 
@@ -64,7 +82,7 @@ def main():
         transforms.ToTensor(),
         normalize])
 
-    # valset is really the test set. Wanted to keep name consistent with ImageNet version.
+    # valset is really the test set.
     if args.ten:
         train_dataset = torchvision.datasets.CIFAR10(
             root='./Data/cifar-10', train=True, download=True,
@@ -103,62 +121,64 @@ def main():
 
 
     optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
-    #optimizer = optim.SGD(ftrs_to_opt, args.lr, momentum=0.9)
-    #optimizer = optim.Adam(ftrs_to_opt, args.lr)
 
-    if torch.cuda.device_count() > 1:
-        print('using ' + str(torch.cuda.device_count()) + 'devices')
-        model = nn.DataParallel(model)
+    #if torch.cuda.device_count() > 1:
+    #    print('using ' + str(torch.cuda.device_count()) + 'devices')
+    #    model = nn.DataParallel(model)
 
+    # train while replacing every replace_gap
+    replace_gap = 15
     end = time.time()
+    for epoch in range(15*8):
+        if epoch % replace_gap == 0 and epoch // replace_gap < 8:
+            model = model.cpu()
+            replace_conv(model, (-epoch//replace_gap)-1)
+            model = model.cuda()
+            optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
 
+        model.apply(fix)
 
-    for epoch in range(args.epochs):
+        #adjust_learning_rate(optimizer, epoch)
+
+        train(train_loader, model, criterion, optimizer, epoch)
+        # this is a "validation" test. no effect on when the real test happens.
+        #prec1, prec5 = validate(val_loader, model, criterion)
+        #best_prec1 = max(best_prec1, prec1.item())
+        #best_prec5 = max(best_prec5, prec5.item())
+
+    for epoch in range(100):
+        model.apply(fix)
         adjust_learning_rate(optimizer, epoch)
         train(train_loader, model, criterion, optimizer, epoch)
-
-        # this is a "validation" test. no effect on when the real test happens.
         prec1, prec5 = validate(val_loader, model, criterion)
         best_prec1 = max(best_prec1, prec1.item())
         best_prec5 = max(best_prec5, prec5.item())
 
+
     train_time = time.time() - end
     end = time.time()
 
-
-    # this is the "real" test.
     top1, top5 = validate(val_loader, model, criterion)
 
     val_time = time.time() - end
 
+    print('\n\ncifar10:' if args.ten else 'cifar100:')
+    print('ALSH Conv TEST')
+    print(' * Original Model: ' + args.model_name)
     print('\n')
-    print('\n')
-    print('cifar10:' if args.ten else 'cifar100:')
-    print('\n')
-
     print('This test used: \t'
           '{epochs} Epochs, \t'
           '{bs} Batch Size, \t'
-          '{lr} Initial LR, \t'
-          '{dc} Decay Coef'.\
+          '{lr} LR, \t'
+          '{dc} Decay'.\
           format(epochs=args.epochs, bs=args.batch_size, lr=args.lr,
                  dc=args.decay_coef))
-
     print(' * Total Train Time:   ' + str(train_time))
     print(' * Final top1 Val Acc: ' + str(top1.item()))
     print(' * Final top5 Val Acc: ' + str(top5.item()))
     print(' * Best top1 Val Acc:  ' + str(best_prec1))
     print(' * best top5 Val Acc:  ' + str(best_prec5))
     print(' * CPU Val Time:       ' + str(val_time))
-
-
-    file_name = 'cifar{num}_{model}_{acc:.2f}'.\
-        format(num=(10 if args.ten else 100),
-               model=('squeezenet' if args.model == 0 else 'vgg16'),
-               acc=top1.item())
-    path = '/data/zhanglab/afeeney/models/' + file_name
-    torch.save(model, path)
-    print('model saved to ' + path)
 
 
 
@@ -286,10 +306,22 @@ def adjust_learning_rate(optimizer, epoch):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-
 def set_ALSH_mode(m):
     if isinstance(m, Conv.ALSHConv2d):
         m.ALSH_mode()
+
+def sqz_cifar():
+    model = models.squeezenet1_1(pretrained=True)
+    model.num_classes=10 if args.ten else 100
+    model.classifier[1] = nn.Conv2d(512, model.num_classes, kernel_size=1,
+                                    stride=1)
+    return model
+
+def vgg_cifar():
+    model = models.vgg16_bn(pretrained=True)
+    model.num_classes=10 if args.ten else 100
+    model.classifier[-1] = nn.Linear(4096, model.num_classes)
+    return model
 
 if __name__ == "__main__":
     main()

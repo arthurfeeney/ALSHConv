@@ -55,9 +55,9 @@ class MultiHash_SRP(nn.Module):
         Uses SRP on the rows a matrix.
         """
         # N x num_bits
-        bits = (torch.mm(matr, self.a) > 0).float()
+        bits = (torch.mm(matr, self.a.to(matr)) > 0).float()
 
-        return (bits * self.bit_mask).sum(1).view(-1).long()
+        return (bits * self.bit_mask.to(matr)).sum(1).view(-1).long()
 
 
     def hash_obj(self, obj, kernel_size, stride, padding, dilation):
@@ -65,14 +65,15 @@ class MultiHash_SRP(nn.Module):
         depth = obj.size(1)
 
         weight1 = self.a[:depth*kernel_size**2] # avoid appending 0's
-        weight1 = weight1.transpose(0, 1).view(self.bits, -1, kernel_size, kernel_size)#.to(obj)
+        weight1 = weight1.transpose(0, 1).view(self.bits, -1, kernel_size,
+                                    kernel_size).to(obj)
 
         out = torch.nn.functional.conv2d(obj, weight1, stride=stride,
                                          padding=padding, dilation=dilation)
 
         bits = (out.view(out.size(0), -1, self.bits) > 0).float()
 
-        hash = (bits * self.bit_mask).sum(2)
+        hash = (bits * self.bit_mask.to(obj)).sum(2)
 
         # mode not defined for torch.cuda.tensor
         #mode = hash.view(-1).unique().long()

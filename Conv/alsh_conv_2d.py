@@ -28,16 +28,15 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
 
 
     @staticmethod
-    def build(conv, which_hash, hash_init_params, K, L, max_bits, device):
+    def build(conv, which_hash, hash_init_params, K, L, max_bits):
         r'''
         builds the ALSH conv from an existing convolution.
         '''
-        tmp = ALSHConv2d(conv.in_channels, conv.out_channels, conv.kernel_size, conv.stride,
-                         conv.padding, conv.dilation, convbias, which_hash, hash_init_params, K, L,
-                         max_bits, device)
-
-        tmp.weight = conv.weight
-
+        tmp = ALSHConv2d(conv.in_channels, conv.out_channels, conv.kernel_size[0],
+                         conv.stride, conv.padding, conv.dilation,
+                         conv.bias is not None, which_hash, hash_init_params,
+                         K, L, max_bits)
+        tmp.weight.data = conv.weight.data
         return tmp
 
     def cuda(self, device=None):
@@ -47,7 +46,8 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         print('using device gpu!')
         for t in range(len(self.tables.hashes)):
             self.tables.hashes[t].a = self.tables.hashes[t].a.cuda(device)
-            self.tables.hashes[t].bit_mask = self.tables.hashes[t].bit_mask.cuda(device)
+            self.tables.hashes[t].bit_mask = self.tables.hashes[t].bit_mask.\
+                cuda(device)
         self.device = device
         return self._apply(lambda t: t.cuda(device))
 
@@ -68,7 +68,8 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         r'''
         Forward pass of ALSHConv2d.
          -  x is a 4D tensor, I.e., a batch of images.
-         -  LAS (optional) is the indices of the last active set. It specifies which kernels this conv
+         -  LAS (optional) is the indices of the last active set.
+            It specifies which kernels this conv
             should use.
         '''
 
@@ -79,10 +80,12 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         AS, ti = self.get_active_set(x, self.kernel_size[0], self.stride,
                                      self.padding, self.dilation)
 
+        #print(str(AS.size(0)) + ' of ' + str(self.weight.size(0)))
+
         if LAS is None:
             AK = self.weight[AS]
         else:
-            AK = self.weight[AS][:,LAS] # this looks weird, but weight[AS, LAS] doesnt seem to work...
+            AK = self.weight[AS][:,LAS] # weight[AS, LAS] doesnt seem to work...
 
         output = nn.functional.conv2d(x, AK, self.bias[AS],
                                       self.stride, self.padding,

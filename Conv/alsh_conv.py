@@ -20,13 +20,12 @@ class ALSHConv:
     def fill_table(self, filters):
         num = filters.size(0)
 
-        self.tables.insert_data(filters.view(num, -1), torch.arange(0, num).long())
+        self.tables.insert_data(filters.view(num, -1),
+                                torch.arange(0, num).long())
 
     def refill(self, active_kernels, active_set, table_indices):
         self.tables.clear_row(table_indices)
-
         num = active_kernels.size(0)
-
         self.tables.insert_data(active_kernels.view(num, -1), active_set)
 
     def most_freq(self, x, k):
@@ -50,12 +49,11 @@ class ALSHConv:
             topkl[row] = self.most_freq(ti[row], k=k)
 
 
-        #AS = torch.cat([torch.Tensor(self.tables.tables[i][ti[i]]).long() for i in range(self.tables.num_tables)]).unique()
-
         AS = torch.Tensor([]).long()
         for i in range(self.tables.num_tables):
             for j in topkl[i]:
-                AS = torch.cat((AS, torch.Tensor(self.tables.tables[i][j]).long()))
+                AS = torch.cat(
+                    (AS, torch.Tensor(self.tables.tables[i][j]).long()))
 
         return AS.sort()[0].unique(sorted=True), ti
 
