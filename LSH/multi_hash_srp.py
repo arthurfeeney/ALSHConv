@@ -7,17 +7,12 @@ class MultiHash_SRP(nn.Module):
         r"""
         which_hash can be 'StableDistribution' or 'SignRandomProjection'
         num_hashes is the number of hashes to concatenate
-        hash_init_params must be a dict of {'dim':d, 'r':r}
         """
 
         self.bits = num_hashes
         self.dim = dim
-
-        # need to create vectors in first section of dim space.
-        # Then find vectors to
-
         self.a = torch.randn(dim, self.bits)
-
+        self.normal = self.a[:-2]
         self.bit_mask = torch.Tensor([2**(i) for i in torch.arange(self.bits)])
 
     @staticmethod
@@ -35,12 +30,14 @@ class MultiHash_SRP(nn.Module):
         r'''
         assuming m = 2 simplifies the problem a lot. And it's not longer
         necessary for it to be any larger than that since Q_obj doesn't
-        append 0's, it just uses a splice of self.a
+        append 0's, it just uses a splice of self.a.
+
+        - x should be a matrix where rows are the datum to be inserted.
         '''
 
-        norm = x.norm(dim=1)
+        norm = x.norm(dim=1) # norm of each row
 
-        norm /= norm.max() / .75
+        norm /= norm.max() / .75 # scale magnitude of each row < .75
 
         norm.unsqueeze_(1)
 
@@ -52,7 +49,7 @@ class MultiHash_SRP(nn.Module):
 
     def hash_matr(self, matr):
         r"""
-        Uses SRP on the rows a matrix.
+        Applies SRP hash to the rows a matrix.
         """
         # N x num_bits
         bits = (torch.mm(matr, self.a.to(matr)) > 0).float()
@@ -60,27 +57,23 @@ class MultiHash_SRP(nn.Module):
         return (bits * self.bit_mask.to(matr)).sum(1).view(-1).long()
 
 
-    def hash_obj(self, obj, kernel_size, stride, padding, dilation):
+    def hash_4d_tensor(self, obj, kernel_size, stride, padding, dilation):
+        r'''
+        applies h(Q(obj)) where h is srp and Q is pre-processing function.
+        '''
 
-        depth = obj.size(1)
+        # small optimization, just prevents some copying across batches
+        normal = self.normal.transpose(0, 1).view(self.bits, -1, kernel_size,
+                                                  kernel_size).to(obj)
 
-        weight1 = self.a[:depth*kernel_size**2] # avoid appending 0's
-        weight1 = weight1.transpose(0, 1).view(self.bits, -1, kernel_size,
-                                    kernel_size).to(obj)
-
-        out = torch.nn.functional.conv2d(obj, weight1, stride=stride,
+        out = torch.nn.functional.conv2d(obj, normal.to(obj), stride=stride,
                                          padding=padding, dilation=dilation)
 
         bits = (out.view(out.size(0), -1, self.bits) > 0).float()
 
         hash = (bits * self.bit_mask.to(obj)).sum(2)
 
-        # mode not defined for torch.cuda.tensor
-        #mode = hash.view(-1).unique().long()
-        #print(mode)
-
         return hash
-
 
     def query(self, input, **kwargs):
         r'''
@@ -89,9 +82,9 @@ class MultiHash_SRP(nn.Module):
         padding, and dilation
         '''
         assert input.dim() == 4, \
-            "MultiHash_SRP.query. Input must be dim 1 or dim 4 but got: " + str(input.dim())
-        return self.hash_obj(input, **kwargs)
-
+            "MultiHash_SRP.query. Input must be dim 4 but got: " +\
+            str(input.dim())
+        return self.hash_4d_tensor(input, **kwargs)
 
     def pre(self, input):
         assert input.dim() == 2, \

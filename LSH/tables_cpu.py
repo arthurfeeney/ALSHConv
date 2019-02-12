@@ -29,7 +29,6 @@ class TablesCPU:
         self.hashes = [which_hash(num_hashes,dim,hash_init_params) for _ in t]
         # tables does not contain keys. Only values.
         self.tables = [ [ [] for _ in range(table_size)] for _ in t]
-        #self.tables = [ [ torch.Tensor([]).long() for _ in range(table_size)] for _ in t]
 
     def get(self, key, **kwargs):
         return torch.stack([hash.query(key, **kwargs) % self.table_size for hash in self.hashes])
@@ -57,8 +56,9 @@ class TablesCPU:
         They work as references to the keys.
         """
 
+        t = range(self.num_tables)
+        self.tables = [ [ [] for _ in range(self.table_size)] for _ in t]
         rows = self.put(keys)
-
 
         # can distribute outer loop for each table
         for ti in torch.arange(0, self.num_tables).long():

@@ -43,7 +43,6 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         r'''
         moves to specified GPU device. Also sets device used for hashes.
         '''
-        print('using device gpu!')
         for t in range(len(self.tables.hashes)):
             self.tables.hashes[t].a = self.tables.hashes[t].a.cuda(device)
             self.tables.hashes[t].bit_mask = self.tables.hashes[t].bit_mask.\
@@ -80,7 +79,7 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         AS, ti = self.get_active_set(x, self.kernel_size[0], self.stride,
                                      self.padding, self.dilation)
 
-        #print(str(AS.size(0)) + ' of ' + str(self.weight.size(0)))
+        print(str(AS.size(0)) + ' of ' + str(self.weight.size(0)))
 
         if LAS is None:
             AK = self.weight[AS]
@@ -95,9 +94,10 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
 
         h, w = output.size()[2:]
 
-        # scale by the inverse of the fraction of filters used.
-        scale = AS.size(0) / self.out_channels
-        output /= scale
+        # scale by the inverse of the fraction of filters used. (Shouldn't be necessary due to
+        # retrain step.
+        #scale = AS.size(0) / self.out_channels
+        #output /= scale
 
         out_dims = (x.size(0), self.out_channels, h, w)
 

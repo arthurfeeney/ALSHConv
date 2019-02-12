@@ -32,22 +32,38 @@ parser.add_argument('--batch_size', default=100, type=int, metavar='N')
 parser.add_argument('--lr', '--learning_rate', default=0.1, type=float,
                     metavar='LR')
 parser.add_argument('--decay_coef', default=30, type=int, metavar='N')
-parser.add_argument('--ten', default=True, type=bool,
-                    help='if True, it will use CIFAR10, if False, CIFAR100')
+parser.add_argument('--replace_gap', default=10, type=int, metavar='N')
+parser.add_argument('--depth', default=4, type=int, metavar='N')
+parser.add_argument('--final_epochs', default=20, type=int, metavar='N')
+parser.add_argument('--noten', dest='ten', action='store_false')
+
 
 def replace_conv(model, idx):
     if isinstance(model.features[idx], models.squeezenet.Fire):
-        #model.features[idx].squeeze =  Conv.ALSHConv2d.build(
-        #    model.features[idx].squeeze, MultiHash_SRP, {}, 5, 4, 2**5)
+        model.features[idx].squeeze =  Conv.ALSHConv2d.build(
+            model.features[idx].squeeze, MultiHash_SRP, {}, 5, 4, 2**5)
         model.features[idx].expand1x1 = Conv.ALSHConv2d.build(
             model.features[idx].expand1x1, MultiHash_SRP, {}, 5, 4, 2**5)
         model.features[idx].expand3x3 = Conv.ALSHConv2d.build(
             model.features[idx].expand3x3, MultiHash_SRP, {}, 5, 4, 2**5)
 
+def replace_next_conv(model, current):
+    while not isinstance(model.features[current], nn.Conv2d):
+        current -= 1
+    if isinstance(model.features[current], nn.Conv2d):
+        print('REPLACED REGULAR Conv2d WITH ALSHConv2d')
+        model.features[current] = Conv.ALSHConv2d.build(
+            model.features[current], MultiHash_SRP, {}, 5, 3, 2**5)
+    return current-1
+
 def fix(m):
     if isinstance(m, Conv.ALSHConv2d):
         m.fix()
         m = m.cuda()
+
+def to_cpu(m):
+    if isinstance(m, Conv.ALSHConv2d):
+        m = m.cpu()
 
 def main():
     ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -55,15 +71,16 @@ def main():
 
     args = parser.parse_args()
 
-    model = sqz_cifar() if args.model == 0 else vgg_cifar()
+    if args.model == 0:
+        model = sqz_cifar()
+    elif args.model == 1:
+        vgg_cifar(version=models.alexnet)
+    else:
+        vgg_cifar(version=models.vgg11)
+
     model = torch.load(args.model_path + args.model_name)
+
     model = model.module.cpu()
-
-    #replace_conv(model, -1)
-    #replace_conv(model, -2)
-    #replace_conv(model, -3)
-    #replace_conv(model, -4)
-
     model.apply(fix)
 
     train_sampler = None
@@ -111,55 +128,67 @@ def main():
 
     criterion = nn.CrossEntropyLoss()
 
-    ftrs_to_opt = [{'params': model.features[-1].parameters()},
-                   {'params': model.features[-2].parameters()},
-                   {'params': model.features[-3].parameters()},
-                   #{'params': model.features[-4].parameters()},
-                   {'params': model.classifier.parameters()}]
+    #ftrs_to_opt = [{'params': model.features[-1].parameters()},
+    #               {'params': model.features[-2].parameters()},
+    #               {'params': model.features[-3].parameters()},
+    #               {'params': model.classifier.parameters()}]
 
     model = model.cuda()
 
-
     optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
 
-    #if torch.cuda.device_count() > 1:
-    #    print('using ' + str(torch.cuda.device_count()) + 'devices')
-    #    model = nn.DataParallel(model)
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
 
     # train while replacing every replace_gap
-    replace_gap = 15
+    #replace_gap = 7 # 15
+    #depth = 4 # vgg11=9, sqznet uses 10
     end = time.time()
-    for epoch in range(15*8):
-        if epoch % replace_gap == 0 and epoch // replace_gap < 8:
-            model = model.cpu()
-            replace_conv(model, (-epoch//replace_gap)-1)
-            model = model.cuda()
-            optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
+
+    loss_file_path = '/data/zhanglab/afeeney/losses/'
+    file_name = 'cifar{num}_{model}'.\
+        format(num=(10 if args.ten else 100),
+               model=('alexnet' if args.model == 1 else 'vgg11'))
+
+    loss_file = open(loss_file_path + file_name, 'w+')
+    avg_loss_file = open(loss_file_path + file_name + '_avg', 'w+')
+
+
+    current_depth = 0
+    for epoch in range(args.replace_gap*args.depth):
+        if epoch % args.replace_gap == 0:
+            if torch.cuda.device_count() > 1:
+                model = model.module.cpu()
+                current_depth = replace_next_conv(model, current_depth)
+                model = model.cuda()
+                model = nn.DataParallel(model)
+                optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
 
         model.apply(fix)
+        train(train_loader, model, criterion, optimizer, epoch, loss_file,
+              avg_loss_file)
 
-        #adjust_learning_rate(optimizer, epoch)
 
-        train(train_loader, model, criterion, optimizer, epoch)
-        # this is a "validation" test. no effect on when the real test happens.
-        #prec1, prec5 = validate(val_loader, model, criterion)
+    for epoch in range(args.final_epochs):
+        model.apply(fix)
+        adjust_learning_rate(optimizer, epoch)
+        train(train_loader, model, criterion, optimizer, epoch, loss_file,
+              avg_loss_file)
+        #prec1, prec5, avg_batch_time = validate(val_loader, model,
+        #                                         criterion, time_file)
         #best_prec1 = max(best_prec1, prec1.item())
         #best_prec5 = max(best_prec5, prec5.item())
 
-    for epoch in range(100):
-        model.apply(fix)
-        adjust_learning_rate(optimizer, epoch)
-        train(train_loader, model, criterion, optimizer, epoch)
-        prec1, prec5 = validate(val_loader, model, criterion)
-        best_prec1 = max(best_prec1, prec1.item())
-        best_prec5 = max(best_prec5, prec5.item())
-
-
     train_time = time.time() - end
+
+
+    # fix weights and switch to cpu before validation.
+    model.apply(fix)
+    model = model.module.cpu()
+    model.apply(to_cpu)
+
     end = time.time()
-
-    top1, top5 = validate(val_loader, model, criterion)
-
+    top1, top5, avg_batch_time = validate(val_loader, model, criterion)
     val_time = time.time() - end
 
     print('\n\ncifar10:' if args.ten else 'cifar100:')
@@ -179,10 +208,10 @@ def main():
     print(' * Best top1 Val Acc:  ' + str(best_prec1))
     print(' * best top5 Val Acc:  ' + str(best_prec5))
     print(' * CPU Val Time:       ' + str(val_time))
+    print(' * Average Batch Time: ' + str(avg_batch_time))
 
-
-
-def train(train_loader, model, criterion, optimizer, epoch):
+def train(train_loader, model, criterion, optimizer, epoch, loss_file,
+          avg_loss_file):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -203,7 +232,13 @@ def train(train_loader, model, criterion, optimizer, epoch):
         output = model(input_var)
         loss = criterion(output, target_var)
 
+
+        loss_file.write(str(loss.item()) + '\n')
+
+
         prec1, prec5 = accuracy(output.data, target, topk=(1,5))
+
+
         losses.update(loss.item(), input.size(0))
         top1.update(prec1[0], input.size(0))
         top5.update(prec5[0], input.size(0))
@@ -225,6 +260,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   epoch, i, len(train_loader), batch_time=batch_time,
                   data_time=data_time, loss=losses, top1=top1, top5=top5))
 
+    avg_loss_file.write(str(losses.avg) + '\n')
+
 
 def validate(val_loader, model, criterion):
     batch_time = AverageMeter()
@@ -238,8 +275,8 @@ def validate(val_loader, model, criterion):
     end = time.time()
     for i, (input, target) in enumerate(val_loader):
         with torch.no_grad():
-            input = input.cuda()
-            target = target.cuda()
+            input = input.cpu()
+            target = target.cpu()
 
             input_var = torch.autograd.Variable(input)
             target_var = torch.autograd.Variable(target)
@@ -265,7 +302,7 @@ def validate(val_loader, model, criterion):
                       i, len(val_loader), batch_time=batch_time, loss=losses,
                       top1=top1, top5=top5))
 
-    return top1.avg, top5.avg
+    return top1.avg, top5.avg, batch_time.avg
 
 
 class AverageMeter(object):
@@ -317,8 +354,8 @@ def sqz_cifar():
                                     stride=1)
     return model
 
-def vgg_cifar():
-    model = models.vgg16_bn(pretrained=True)
+def vgg_cifar(version):
+    model = version(pretrained=True)
     model.num_classes=10 if args.ten else 100
     model.classifier[-1] = nn.Linear(4096, model.num_classes)
     return model
