@@ -12,6 +12,9 @@ def zero_fill_missing(x, i, dims, device):
     return t
 
 class ALSHConv2d(nn.Conv2d, ALSHConv):
+
+    LAS = None # static class variable to track last called layer's active set.
+
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, bias, which_hash, hash_init_params,
                  K, L, max_bits, device='cpu'):
@@ -26,6 +29,9 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         # cache is used for modifying ALSH tables after an update.
         self.cache = None
 
+        self.first = False
+        self.last = False
+
 
     @staticmethod
     def build(conv, which_hash, hash_init_params, K, L, max_bits):
@@ -38,6 +44,9 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
                          K, L, max_bits)
         tmp.weight.data = conv.weight.data
         return tmp
+
+    def avg_bucket_freq(self):
+        return self.bucket_stats.avg
 
     def cuda(self, device=None):
         r'''
@@ -63,7 +72,7 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
     def fix(self):
         self.fill_table(self.weight)
 
-    def forward(self, x, LAS=None):
+    def forward(self, x):
         r'''
         Forward pass of ALSHConv2d.
          -  x is a 4D tensor, I.e., a batch of images.
@@ -72,33 +81,32 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
             should use.
         '''
 
-        #if self.cache is not None and self.training:
-        #    active_kernels, active_set, table_indices = self.cache
-        #    self.refill(active_kernels, active_set, table_indices)
+        LAS = ALSHConv2d.LAS if not self.first else None
 
         AS, ti = self.get_active_set(x, self.kernel_size[0], self.stride,
-                                     self.padding, self.dilation)
+                                     self.padding, self.dilation,
+                                     LAS)
 
-        print(str(AS.size(0)) + ' of ' + str(self.weight.size(0)))
-
-        if LAS is None:
+        if self.first:
             AK = self.weight[AS]
         else:
-            AK = self.weight[AS][:,LAS] # weight[AS, LAS] doesnt seem to work...
+            AK = self.weight[AS][:,ALSHConv2d.LAS]
 
         output = nn.functional.conv2d(x, AK, self.bias[AS],
                                       self.stride, self.padding,
                                       self.dilation)
 
-        #self.cache = AK, AS, ti
-
         h, w = output.size()[2:]
 
-        # scale by the inverse of the fraction of filters used. (Shouldn't be necessary due to
-        # retrain step.
+        # scale by the inverse of the fraction of filters used.
+        # retrain step?
         #scale = AS.size(0) / self.out_channels
         #output /= scale
 
-        out_dims = (x.size(0), self.out_channels, h, w)
+        if self.last:
+            out_dims = (x.size(0), self.out_channels, h, w)
+            return zero_fill_missing(output, AS, out_dims, device=self.device)
 
-        return zero_fill_missing(output, AS, out_dims, device=self.device) #, AS
+        else:
+            ALSHConv2d.LAS = AS
+            return output

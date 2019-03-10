@@ -60,15 +60,12 @@ class TablesCPU:
         self.tables = [ [ [] for _ in range(self.table_size)] for _ in t]
         rows = self.put(keys)
 
-        # can distribute outer loop for each table
+        # can parallelize outer loop for each table?
+
         for ti in torch.arange(0, self.num_tables).long():
             #for val in values:#torch.arange(0, len(values)):
             for row, val in zip(rows[ti], values):
-                #print(len(rows))
-                #print(row)
                 self.tables[ti][row].append(int(val))
-                #self.tables[ti][rows[ti][row]] = \
-                #    torch.cat((self.tables[ti][rows[ti][row]], torch.Tensor([values[row]]).long()))
 
     def get_query_rows(self, q):
         indices = self._get(q)

@@ -23,12 +23,14 @@ best_prec5 = 0
 parser = argparse.ArgumentParser(description='arguments for CIFAR validation')
 parser.add_argument('model_path', metavar='DIR', help='path to load model')
 parser.add_argument('--model_name', type=str, help='name of the model to load')
+parser.add_argument('--time_file', type=str, help='name of the model to load')
 parser.add_argument('--model', default=0, type=int, metavar='N',
                     help='0=squeezenet, 1=vgg16_bn')
 parser.add_argument('--workers', default=2, type=int, metavar='N')
 parser.add_argument('--noten', dest='ten', action='store_false')
 
 def main():
+    torch.set_num_threads(16)
     ImageFile.LOAD_TRUNCATED_IMAGES = True
     global args, best_prec1, best_prec5
 
@@ -38,8 +40,10 @@ def main():
         model = sqz_cifar()
     elif args.model == 1:
         model = vgg_cifar(version=models.vgg16_bn)
-    else:
+    elif args.model == 2:
         model = vgg_cifar(version=models.vgg11)
+    else:
+        vgg_cifar(version=models.alexnet)
 
 
     model = torch.load(args.model_path + args.model_name,
@@ -87,8 +91,13 @@ def main():
     criterion = nn.CrossEntropyLoss()
     model = model.cpu()
 
+    time_file_path = '/data/zhanglab/afeeney/times/'
+    time_file = open(time_file_path + args.time_file + '_NO_ALSH', 'w+')
+
+    iters = 21 * 5
+
     end = time.time()
-    top1, top5, avg_batch_time = validate(val_loader, model, criterion)
+    avg_batch_time = validate(val_loader, model, criterion, time_file, iters)
     val_time = time.time() - end
 
     print('Base Time Test For CPU Validation')
@@ -100,38 +109,28 @@ def main():
 
 
 
-def validate(val_loader, model, criterion):
+def validate(val_loader, model, criterion, time_file, iters):
     batch_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
 
     model.eval()
 
-    start = time.time()
-    end = time.time()
     for i, (input, target) in enumerate(val_loader):
         with torch.no_grad():
 
             input_var = torch.autograd.Variable(input)
             target_var = torch.autograd.Variable(target)
 
-            output = model(input_var)
-            loss = criterion(output, target_var)
-
-            prec1, prec5 = accuracy(output.data, target, topk=(1,5))
-
-            losses.update(loss.item(), input.size(0))
-            top1.update(prec1[0], input.size(0))
-            top5.update(prec5[0], input.size(0))
-
-            batch_time.update(time.time() - end)
             end = time.time()
+            output = model(input_var)
+            batch_time.update(time.time() - end)
 
-        if i == 20:
-            return top1.avg, top5.avg, batch_time.avg
+            if i > 0:
+                time_file.write(str(batch_time.val) + '\n')
 
-    return top1.avg, top5.avg, batch_time.avg
+        if i == iters:
+            return batch_time.avg
+
+    return batch_time.avg
 
 
 class AverageMeter(object):

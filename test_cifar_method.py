@@ -65,6 +65,16 @@ def to_cpu(m):
     if isinstance(m, Conv.ALSHConv2d):
         m = m.cpu()
 
+def replace_relu(model):
+    for i in range(len(model.features)):
+        if isinstance(model.features[i], nn.ReLU):
+            model.features[i] = nn.Softshrink()
+
+def model_bucket_avg(model):
+    for i in range(len(model.features)):
+        if isinstance(model.features[i], Conv.ALSHConv2d):
+            print(model.features[i].avg_bucket_freq())
+
 def main():
     ImageFile.LOAD_TRUNCATED_IMAGES = True
     global args, best_prec1, best_prec5
@@ -123,15 +133,10 @@ def main():
         pin_memory=True, sampler=train_sampler)
 
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=64, shuffle=False,
+        val_dataset, batch_size=args.batch_size, shuffle=False,
 	    num_workers=args.workers, pin_memory=False)
 
     criterion = nn.CrossEntropyLoss()
-
-    #ftrs_to_opt = [{'params': model.features[-1].parameters()},
-    #               {'params': model.features[-2].parameters()},
-    #               {'params': model.features[-3].parameters()},
-    #               {'params': model.classifier.parameters()}]
 
     model = model.cuda()
 
@@ -143,7 +148,6 @@ def main():
     # train while replacing every replace_gap
     #replace_gap = 7 # 15
     #depth = 4 # vgg11=9, sqznet uses 10
-    end = time.time()
 
     loss_file_path = '/data/zhanglab/afeeney/losses/'
     file_name = 'cifar{num}_{model}'.\
@@ -153,13 +157,19 @@ def main():
     loss_file = open(loss_file_path + file_name, 'w+')
     avg_loss_file = open(loss_file_path + file_name + '_avg', 'w+')
 
+    val_loss_file = open(loss_file_path + file_name + '_val', 'w+')
+    val_avg_loss_file = open(loss_file_path + file_name + '_avg' + '_val', 'w+')
 
-    current_depth = 0
+    end = time.time()
+
+    current_depth = len(model.module.features)-1
     for epoch in range(args.replace_gap*args.depth):
         if epoch % args.replace_gap == 0:
             if torch.cuda.device_count() > 1:
                 model = model.module.cpu()
                 current_depth = replace_next_conv(model, current_depth)
+                model.features[current_depth+1].last = True
+                model.features[current_depth+1].first = True
                 model = model.cuda()
                 model = nn.DataParallel(model)
                 optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
@@ -168,27 +178,37 @@ def main():
         train(train_loader, model, criterion, optimizer, epoch, loss_file,
               avg_loss_file)
 
+        # VALIDATION
+        #prec1, prec5, avg_batch_time = validate(val_loader, model,
+        #                                        criterion, val_loss_file, val_avg_loss_file)
+        #best_prec1 = max(best_prec1, prec1.item())
+        #best_prec5 = max(best_prec5, prec5.item())
+
 
     for epoch in range(args.final_epochs):
         model.apply(fix)
         adjust_learning_rate(optimizer, epoch)
         train(train_loader, model, criterion, optimizer, epoch, loss_file,
               avg_loss_file)
-        #prec1, prec5, avg_batch_time = validate(val_loader, model,
-        #                                         criterion, time_file)
-        #best_prec1 = max(best_prec1, prec1.item())
-        #best_prec5 = max(best_prec5, prec5.item())
+
+        # VALIDATION
+        prec1, prec5, avg_batch_time = validate(val_loader, model,
+                                                criterion, val_loss_file,
+                                                val_avg_loss_file)
+        best_prec1 = max(best_prec1, prec1.item())
+        best_prec5 = max(best_prec5, prec5.item())
 
     train_time = time.time() - end
 
 
     # fix weights and switch to cpu before validation.
     model.apply(fix)
-    model = model.module.cpu()
-    model.apply(to_cpu)
+    #model = model.module.cpu()
+    #model.apply(to_cpu)
 
     end = time.time()
-    top1, top5, avg_batch_time = validate(val_loader, model, criterion)
+    top1, top5, avg_batch_time = validate(val_loader, model, criterion,
+                                          val_loss_file, val_avg_loss_file)
     val_time = time.time() - end
 
     print('\n\ncifar10:' if args.ten else 'cifar100:')
@@ -209,6 +229,8 @@ def main():
     print(' * best top5 Val Acc:  ' + str(best_prec5))
     print(' * CPU Val Time:       ' + str(val_time))
     print(' * Average Batch Time: ' + str(avg_batch_time))
+    print(' * Command Line Args:  ')
+    print(args)
 
 def train(train_loader, model, criterion, optimizer, epoch, loss_file,
           avg_loss_file):
@@ -263,7 +285,9 @@ def train(train_loader, model, criterion, optimizer, epoch, loss_file,
     avg_loss_file.write(str(losses.avg) + '\n')
 
 
-def validate(val_loader, model, criterion):
+def validate(val_loader, model, criterion, loss_file, avg_loss_file,
+             use_cuda=True):
+
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -275,14 +299,20 @@ def validate(val_loader, model, criterion):
     end = time.time()
     for i, (input, target) in enumerate(val_loader):
         with torch.no_grad():
-            input = input.cpu()
-            target = target.cpu()
+            if use_cuda:
+                input = input.cuda()
+                target = target.cuda(async=True)
+            else:
+                input = input.cpu()
+                target = target.cpu()
 
             input_var = torch.autograd.Variable(input)
             target_var = torch.autograd.Variable(target)
 
             output = model(input_var)
             loss = criterion(output, target_var)
+
+            loss_file.write(str(loss.item()) + '\n')
 
             prec1, prec5 = accuracy(output.data, target, topk=(1,5))
 
@@ -301,6 +331,8 @@ def validate(val_loader, model, criterion):
                       'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                       i, len(val_loader), batch_time=batch_time, loss=losses,
                       top1=top1, top5=top5))
+
+    avg_loss_file.write(str(losses.avg) + '\n')
 
     return top1.avg, top5.avg, batch_time.avg
 

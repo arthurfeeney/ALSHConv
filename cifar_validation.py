@@ -21,6 +21,7 @@ best_prec1 = 0
 best_prec5 = 0
 
 parser = argparse.ArgumentParser(description='arguments for CIFAR validation')
+parser.add_argument('--data_dir', metavar='DIR', help='The path to the dataset')
 parser.add_argument('--model', default=0, type=int, metavar='N', help='0=squeezenet, 1=vgg16')
 parser.add_argument('--workers', default=2, type=int, metavar='N')
 parser.add_argument('--print_frequency', default=100, type=int, metavar='N')
@@ -32,6 +33,21 @@ parser.add_argument('--noten', dest='ten', action='store_false')
 #parser.add_argument('--ten', default=True, type=bool,
 #                    help='if True, it will use CIFAR10, if False, CIFAR100')
 
+def replace_relu(model):
+    for i in range(len(model.features)):
+        if isinstance(model.features[i], nn.ReLU):
+            #model.features[i] = nn.Softshrink(lambd=0.3)
+            model.features[i] = nn.ELU()
+
+def replace_next_relu(model, current):
+    while not isinstance(model.features[current], nn.ReLU):
+        current -= 1
+        if current == 0:
+            return 0
+    if isinstance(model.features[current], nn.ReLU):
+        print('REPLACED ReLU with Softshrink')
+        model.features[current] = nn.ELU()
+    return current-1
 
 def main():
     ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -65,22 +81,13 @@ def main():
         normalize])
 
     # valset is really the test set. Wanted to keep name consistent with ImageNet version.
-    if args.ten:
-        train_dataset = torchvision.datasets.CIFAR10(
-            root='./Data/cifar-10', train=True, download=True,
-            transform=train_transform)
+    train_dataset = torchvision.datasets.CIFAR10(
+        root=args.data_dir, train=True, download=True,
+        transform=train_transform)
 
-        val_dataset = torchvision.datasets.CIFAR10(
-            root='./Data/cifar-10', train=False, download=True,
-            transform=val_transform)
-    else:
-        train_dataset = torchvision.datasets.CIFAR100(
-            root='./Data/cifar-100', train=True, download=True,
-            transform=train_transform)
-
-        val_dataset = torchvision.datasets.CIFAR100(
-            root='./Data/cifar-100', train=False, download=True,
-            transform=val_transform)
+    val_dataset = torchvision.datasets.CIFAR10(
+        root=args.data_dir, train=False, download=True,
+        transform=val_transform)
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size,
@@ -99,10 +106,12 @@ def main():
                    #{'params': model.features[-4].parameters()},
                    {'params': model.classifier.parameters()}]
 
-    model = model.cuda()
+    #replace_relu(model)
+
+    #model = model.cuda()
 
 
-    optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
+    optimizer = optim.Adam(model.parameters())#, args.lr, momentum=0.9)
     #optimizer = optim.SGD(ftrs_to_opt, args.lr, momentum=0.9)
     #optimizer = optim.Adam(ftrs_to_opt, args.lr)
 
@@ -113,7 +122,18 @@ def main():
     end = time.time()
 
 
+
+    current_depth = len(model.module.features) - 1
+    gap = 10
+
     for epoch in range(args.epochs):
+        if epoch % gap == 0 and current_depth > 0:
+            model = model.module.cpu()
+            current_depth = replace_next_relu(model, current_depth)
+            model = model.cuda()
+            model = nn.DataParallel(model)
+            optimizer = optim.Adam(model.parameters())#, args.lr, momentum=0.9)
+
         adjust_learning_rate(optimizer, epoch)
         train(train_loader, model, criterion, optimizer, epoch)
 
@@ -152,7 +172,7 @@ def main():
     print(' * CPU Val Time:       ' + str(val_time))
 
 
-    file_name = 'cifar{num}_{model}_{acc:.2f}'.\
+    file_name = 'softshrink_cifar{num}_{model}_{acc:.2f}'.\
         format(num=(10 if args.ten else 100),
                model=('alexnet' if args.model == 0 else 'vgg11'),
                acc=top1.item())

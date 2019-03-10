@@ -28,6 +28,19 @@ parser.add_argument('--devices', default=1, type=int, metavar='N')
 parser.add_argument('--batch_size', default=128, type=int, metavar='N')
 parser.add_argument('--lr', '--learning_rate', default=0.001, type=float, metavar='LR')
 
+def replace_next_conv(model, current):
+    while not isinstance(model.features[current], nn.Conv2d):
+        current -= 1
+    if isinstance(model.features[current], nn.Conv2d):
+        print('REPLACED REGULAR Conv2d WITH ALSHConv2d')
+        model.features[current] = Conv.ALSHConv2d.build(
+            model.features[current], MultiHash_SRP, {}, 5, 3, 2**5)
+    return current-1
+
+def fix(m):
+    if isinstance(m, Conv.ALSHConv2d):
+        m.fix()
+        m = m.cpu()
 
 def main():
     ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -35,7 +48,7 @@ def main():
 
     args = parser.parse_args()
 
-    model = models.squeezenet1_1(pretrained=True)
+    model = models.alexnet(pretrained=True)#models.squeezenet1_1(pretrained=True)
 
     ftr_weight = model.features[-1].expand3x3.weight
     r = Conv.ALSHConv2d(64, 256, 3, 1, 1, 1, True, MultiHash_SRP, {}, 5, 8, 2**5)
@@ -83,39 +96,29 @@ def main():
 	    num_workers=args.workers, pin_memory=False)
 
     model = model.cuda()
-    model.features[-1].expand3x3 = model.features[-1].expand3x3.cuda()
-    model.features[-2].expand3x3 = model.features[-2].expand3x3.cuda()
-
-
 
 
     criterion = nn.CrossEntropyLoss()
 
-    ftrs_to_opt = [{'params': model.features[-1].parameters()},
-                   {'params': model.features[-2].parameters()},
-                   {'params': model.classifier.parameters()}]
-
-
-    #optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
-    optimizer = optim.SGD(ftrs_to_opt, args.lr, momentum=0.9)
+    optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
 
     #if torch.cuda.device_count() > 1:
     #    model = nn.DataParallel(model)
-
-    for name in model.modules():
-        print(name)
 
 
 
     end = time.time()
 
-    for epoch in range(args.epochs):
-        adjust_learning_rate(optimizer, epoch)
-        train(train_loader, model, criterion, optimizer, epoch)
+    depth = 4
+    current = 0
 
-        # rearrange the ALSH table with the new weights.
-        model.features[-1].expand3x3.fix()
-        model.features[-2].expand3x3.fix()
+    for d in range(depth):
+        replace_next_conv(model.features[current
+
+
+    #for epoch in range(args.epochs):
+    #    adjust_learning_rate(optimizer, epoch)
+    #    train(train_loader, model, criterion, optimizer, epoch)
 
         #prec1, prec5 = validate(val_loader, model, criterion)
         #best_prec1 = max(prec1, best_prec1)
@@ -124,9 +127,6 @@ def main():
     train_time = time.time() - end
     end = time.time()
 
-    model.cpu()
-    model.features[-1].expand3x3 = model.features[-1].expand3x3.cpu()
-    model.features[-2].expand3x3 = model.features[-2].expand3x3.cpu()
     validate(val_loader, model, criterion)
 
     val_time = time.time() - end
