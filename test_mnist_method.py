@@ -21,11 +21,7 @@ best_prec1 = 0
 best_prec5 = 0
 
 parser = argparse.ArgumentParser(description='arguments for CIFAR validation')
-parser.add_argument('model_path', metavar='DIR', help='path to load model')
-parset.add_argumrnt('--data_dir', metavar='DIR', help='path to the dataset')
-parser.add_argument('--model_name', type=str, help='name of the model to load')
-parser.add_argument('--model', default=0, type=int, metavar='N',
-                    help='0=squeezenet, 1=vgg16_bn')
+parser.add_argument('--data_dir', metavar='DIR', help='path to the dataset')
 parser.add_argument('--workers', default=2, type=int, metavar='N')
 parser.add_argument('--print_frequency', default=100, type=int, metavar='N')
 parser.add_argument('--epochs', default=1, type=int, metavar='N')
@@ -36,17 +32,6 @@ parser.add_argument('--decay_coef', default=30, type=int, metavar='N')
 parser.add_argument('--replace_gap', default=10, type=int, metavar='N')
 parser.add_argument('--depth', default=4, type=int, metavar='N')
 parser.add_argument('--final_epochs', default=20, type=int, metavar='N')
-parser.add_argument('--noten', dest='ten', action='store_false')
-
-
-def replace_conv(model, idx):
-    if isinstance(model.features[idx], models.squeezenet.Fire):
-        model.features[idx].squeeze =  Conv.ALSHConv2d.build(
-            model.features[idx].squeeze, MultiHash_SRP, {}, 5, 4, 2**5)
-        model.features[idx].expand1x1 = Conv.ALSHConv2d.build(
-            model.features[idx].expand1x1, MultiHash_SRP, {}, 5, 4, 2**5)
-        model.features[idx].expand3x3 = Conv.ALSHConv2d.build(
-            model.features[idx].expand3x3, MultiHash_SRP, {}, 5, 4, 2**5)
 
 def replace_next_conv(model, current):
     while not isinstance(model.features[current], nn.Conv2d):
@@ -66,15 +51,36 @@ def to_cpu(m):
     if isinstance(m, Conv.ALSHConv2d):
         m = m.cpu()
 
-def replace_relu(model):
-    for i in range(len(model.features)):
-        if isinstance(model.features[i], nn.ReLU):
-            model.features[i] = nn.Softshrink()
-
 def model_bucket_avg(model):
     for i in range(len(model.features)):
         if isinstance(model.features[i], Conv.ALSHConv2d):
             print(model.features[i].avg_bucket_freq())
+
+class Model(nn.Module):
+    def __init__(self, num_classes=10):
+        super(Model, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
+            #nn.Softshrink(lambd=0.2),
+            nn.ELU(inplace=True),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+            #nn.Softshrink(lambd=0.2),
+            nn.ELU(inplace=True),
+            #nn.Dropout(.75)
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+        )
+        self.classifier = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(6272, num_classes),
+            nn.Softmax(dim=1)
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        return self.classifier(x)
 
 def main():
     ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -82,39 +88,25 @@ def main():
 
     args = parser.parse_args()
 
-    if args.model == 0:
-        model = sqz_cifar()
-    elif args.model == 1:
-        vgg_cifar(version=models.alexnet)
-    else:
-        vgg_cifar(version=models.vgg11)
-
-    model = torch.load(args.model_path + args.model_name)
-
-    model = model.module.cpu()
-    model.apply(fix)
-
     train_sampler = None
 
+    #normalize = transforms.Normalize(mean=(0.0,0.0,0.0),
+    #                                 std=(.3,.3,.3))
     normalize = transforms.Normalize(mean=(0.485,0.456,0.406),
                                      std=(0.229,0.224,0.225))
 
     train_transform = transforms.Compose([
-        transforms.RandomResizedCrop(224),
-        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         normalize])
     val_transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
         transforms.ToTensor(),
         normalize])
 
-    train_dataset = torchvision.datasets.CIFAR10(
+    train_dataset = torchvision.datasets.MNIST(
         root=args.data_dir, train=True, download=True,
         transform=train_transform)
 
-    val_dataset = torchvision.datasets.CIFAR10(
+    val_dataset = torchvision.datasets.MNIST(
         root=args.data_dir, train=False, download=True,
         transform=val_transform)
 
@@ -124,90 +116,40 @@ def main():
         pin_memory=True, sampler=train_sampler)
 
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=64, shuffle=False,
+        val_dataset, batch_size=args.batch_size, shuffle=False,
 	    num_workers=args.workers, pin_memory=False)
+
+    model = Model()
 
     criterion = nn.CrossEntropyLoss()
 
-    model = model.cuda()
-
-    optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
+    #optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
+    optimizer = optim.Adam(model.parameters(), args.lr)
 
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-
-    # train while replacing every replace_gap
-    #replace_gap = 7 # 15
-    #depth = 4 # vgg11=9, sqznet uses 10
-
-    loss_file_path = '/data/zhanglab/afeeney/losses/'
-    file_name = 'cifar{num}_{model}'.\
-        format(num=(10 if args.ten else 100),
-               model=('alexnet' if args.model == 1 else 'vgg11'))
-
-    loss_file = open(loss_file_path + file_name, 'w+')
-    avg_loss_file = open(loss_file_path + file_name + '_avg', 'w+')
-
-    end = time.time()
-
-    current_depth = len(model.features)
-    for epoch in range(args.replace_gap*args.depth):
-        if epoch % args.replace_gap == 0:
-            if torch.cuda.device_count() > 1:
-                model = model.module.cpu()
-                current_depth = replace_next_conv(model, current_depth)
-                model = model.cuda()
-                model = nn.DataParallel(model)
-                optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
-
-        model.apply(fix)
-        train(train_loader, model, criterion, optimizer, epoch, loss_file,
-              avg_loss_file)
-
-
-    for epoch in range(args.final_epochs):
-        model.apply(fix)
+    
+    model.train()
+    for epoch in range(args.epochs):
         adjust_learning_rate(optimizer, epoch)
-        train(train_loader, model, criterion, optimizer, epoch, loss_file,
-              avg_loss_file)
-        #prec1, prec5, avg_batch_time = validate(val_loader, model,
-        #                                         criterion, time_file)
-        #best_prec1 = max(best_prec1, prec1.item())
-        #best_prec5 = max(best_prec5, prec5.item())
+        train(train_loader, model, criterion, optimizer, epoch)
 
-    train_time = time.time() - end
-
-
-    # fix weights and switch to cpu before validation.
-    model.apply(fix)
-    model = model.module.cpu()
-    model.apply(to_cpu)
-
-    end = time.time()
+    model.eval()
     top1, top5, avg_batch_time = validate(val_loader, model, criterion)
-    val_time = time.time() - end
 
-    print('\n\ncifar10:' if args.ten else 'cifar100:')
-    print('ALSH Conv TEST')
-    print(' * Original Model: ' + args.model_name)
+    print('\n MNIST Accuracy: \n')
+    print(' * Top1: ' + str(top1))
+    print(' * Top5: ' + str(top5))
     print('\n')
-    print('This test used: \t'
-          '{epochs} Epochs, \t'
-          '{bs} Batch Size, \t'
-          '{lr} LR, \t'
-          '{dc} Decay'.\
-          format(epochs=args.epochs, bs=args.batch_size, lr=args.lr,
-                 dc=args.decay_coef))
-    print(' * Total Train Time:   ' + str(train_time))
-    print(' * Final top1 Val Acc: ' + str(top1.item()))
-    print(' * Final top5 Val Acc: ' + str(top5.item()))
-    print(' * Best top1 Val Acc:  ' + str(best_prec1))
-    print(' * best top5 Val Acc:  ' + str(best_prec5))
-    print(' * CPU Val Time:       ' + str(val_time))
-    print(' * Average Batch Time: ' + str(avg_batch_time))
 
-def train(train_loader, model, criterion, optimizer, epoch, loss_file,
-          avg_loss_file):
+    file_name = 'MNIST_custommodel_{acc:.2f}'.format(acc=top1.item())
+    path = '../Models/' + file_name
+    torch.save(model, path)
+    print('model saved to ' + path)
+
+
+
+def train(train_loader, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -220,20 +162,13 @@ def train(train_loader, model, criterion, optimizer, epoch, loss_file,
     for i, (input, target) in enumerate(train_loader):
         data_time.update(time.time() - end)
 
-        target = target.cuda(async=True)
-
-        input_var = torch.autograd.Variable(input.cuda())
+        input_var = torch.autograd.Variable(input)
         target_var = torch.autograd.Variable(target)
 
         output = model(input_var)
         loss = criterion(output, target_var)
 
-
-        loss_file.write(str(loss.item()) + '\n')
-
-
         prec1, prec5 = accuracy(output.data, target, topk=(1,5))
-
 
         losses.update(loss.item(), input.size(0))
         top1.update(prec1[0], input.size(0))
@@ -255,8 +190,6 @@ def train(train_loader, model, criterion, optimizer, epoch, loss_file,
                   'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
                   epoch, i, len(train_loader), batch_time=batch_time,
                   data_time=data_time, loss=losses, top1=top1, top5=top5))
-
-    avg_loss_file.write(str(losses.avg) + '\n')
 
 
 def validate(val_loader, model, criterion):
