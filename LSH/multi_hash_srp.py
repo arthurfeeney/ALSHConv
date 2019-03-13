@@ -72,7 +72,7 @@ class MultiHash_SRP(nn.Module):
                                          padding=padding, dilation=dilation)
 
         bits = (out.view(out.size(0), -1, self.bits) > 0).float()
-        return (bits * self.bit_mask.to(obj)).sum(2)
+        return  (bits * self.bit_mask.to(obj)).sum(2)
 
     def query(self, input, **kwargs):
         r'''

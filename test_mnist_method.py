@@ -45,7 +45,6 @@ def replace_next_conv(model, current):
 def fix(m):
     if isinstance(m, Conv.ALSHConv2d):
         m.fix()
-        m = m.cuda()
 
 def to_cpu(m):
     if isinstance(m, Conv.ALSHConv2d):
@@ -56,24 +55,28 @@ def model_bucket_avg(model):
         if isinstance(model.features[i], Conv.ALSHConv2d):
             print(model.features[i].avg_bucket_freq())
 
+def init_weight(l):
+    if isinstance(l, nn.Conv2d) or isinstance(l, nn.Linear):
+        nn.init.kaiming_normal_(l.weight)
+
 class Model(nn.Module):
     def __init__(self, num_classes=10):
         super(Model, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
-            #nn.Softshrink(lambd=0.2),
+            nn.Conv2d(1, 32, kernel_size=5, stride=1, padding=1),
             nn.ELU(inplace=True),
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
-            #nn.Softshrink(lambd=0.2),
-            nn.ELU(inplace=True),
-            #nn.Dropout(.75)
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(inplace=True),
             nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, kernel_size=5, stride=1, padding=1),
+            nn.ELU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
+            nn.ELU(inplace=True),
         )
         self.classifier = nn.Sequential(
-            nn.Dropout(0.5),
-            nn.Linear(6272, num_classes),
+            #nn.Linear(1600, 200),
+            #nn.ReLU(inplace=True),
+            #nn.Dropout(0.5),
+            nn.Linear(576, num_classes),
             nn.Softmax(dim=1)
         )
 
@@ -96,9 +99,12 @@ def main():
                                      std=(0.229,0.224,0.225))
 
     train_transform = transforms.Compose([
+        #transforms.RandomResizedCrop(28),
         transforms.ToTensor(),
         normalize])
     val_transform = transforms.Compose([
+        #transforms.Resize(32),
+        #transforms.CenterCrop(28),
         transforms.ToTensor(),
         normalize])
 
@@ -119,7 +125,8 @@ def main():
         val_dataset, batch_size=args.batch_size, shuffle=False,
 	    num_workers=args.workers, pin_memory=False)
 
-    model = Model()
+    model = torch.load('../Models/MNIST_custommodel_98.99')
+    print(model)
 
     criterion = nn.CrossEntropyLoss()
 
@@ -128,11 +135,31 @@ def main():
 
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
+
     
     model.train()
+    current_depth = len(model.features)-1
+    flag = True
     for epoch in range(args.epochs):
+        if epoch % args.replace_gap == 0:
+            current_depth = replace_next_conv(model, current_depth)
+            if flag:
+                model.features[current_depth+1].last = True
+                flag = False
+            model.features[current_depth+1].first = True
+        model.apply(fix)
+
+        for table in model.features[current_depth+1].tables.tables:
+            for row in table:
+                print(row)
+            print('\n')
+
+
+
         adjust_learning_rate(optimizer, epoch)
         train(train_loader, model, criterion, optimizer, epoch)
+        model.features[current_depth+1].first = False
+    model.features[current_depth+1].first = True
 
     model.eval()
     top1, top5, avg_batch_time = validate(val_loader, model, criterion)

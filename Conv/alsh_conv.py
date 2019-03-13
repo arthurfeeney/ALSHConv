@@ -72,6 +72,7 @@ class ALSHConv:
 
         for row in range(ti.size(0)):
             topkl[row] = self.most_freq(ti[row], k=k)
+        print(topkl)
 
         #
         # This may stay as for loops because tables is a python list?

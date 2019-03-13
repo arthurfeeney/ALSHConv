@@ -92,6 +92,8 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         else:
             AK = self.weight[AS][:,ALSHConv2d.LAS]
 
+        print('ALSHConv2d, num filters used: ' + str(AK.size(0)))
+
         output = nn.functional.conv2d(x, AK, self.bias[AS],
                                       self.stride, self.padding,
                                       self.dilation)
