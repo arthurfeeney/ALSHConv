@@ -131,7 +131,7 @@ def main():
     avg_time_file = open(time_file_path + args.time_file + '_avg', 'w+')
 
     # train while replacing every replace_gap
-    depth = 4 # vgg11=8, alexnet = 4
+    depth = 7 # vgg11=8, alexnet = 4
 
     model = model.cpu()
     #replace_relu(model) # goes through the model replacing relu with whatever.
@@ -140,14 +140,14 @@ def main():
     for _ in range(depth):
         current_depth = replace_next_conv(model, current_depth)
         model.features[current_depth + 1].first = True
-        #if flag == True:
-        #    model.features[current_depth + 1].last = True
-        #    flag = False
-        model.features[current_depth + 1].last = True
+        if flag == True:
+            model.features[current_depth + 1].last = True
+            flag = False
+        #model.features[current_depth + 1].last = True
         model.apply(fix)
         avg_batch_time = validate(val_loader, model, criterion, time_file)
         avg_time_file.write(str(avg_batch_time) + '\n')
-        #model.features[current_depth+1].first = False
+        model.features[current_depth+1].first = False
 
     model.features[current_depth+1].first = True
 

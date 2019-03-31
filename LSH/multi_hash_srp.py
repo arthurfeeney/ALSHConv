@@ -56,12 +56,9 @@ class MultiHash_SRP(nn.Module):
 
     def hash_4d_tensor(self, obj, kernel_size, stride, padding, dilation,
                        LAS=None):
-        r'''
-        applies h(Q(obj)) where h is srp and Q is pre-processing function.
-        '''
 
         # having normal=a[:-2] instead of a prevents
-        # some copying across batches
+        # some copying each batches
         normal = self.normal.transpose(0, 1).view(self.bits, -1, kernel_size,
                                                   kernel_size).to(obj)
 
@@ -71,8 +68,9 @@ class MultiHash_SRP(nn.Module):
         out = torch.nn.functional.conv2d(obj, normal, stride=stride,
                                          padding=padding, dilation=dilation)
 
-        bits = (out.view(out.size(0), -1, self.bits) > 0).float()
-        return  (bits * self.bit_mask.to(obj)).sum(2)
+        trs = out.view(out.size(0), self.bits, -1).transpose(1,2)
+        bits = (trs >= 0).float()
+        return (bits * self.bit_mask.to(obj)).sum(2)
 
     def query(self, input, **kwargs):
         r'''

@@ -45,15 +45,23 @@ def replace_next_conv(model, current):
 def fix(m):
     if isinstance(m, Conv.ALSHConv2d):
         m.fix()
+        m.cuda()
 
 def to_cpu(m):
     if isinstance(m, Conv.ALSHConv2d):
         m = m.cpu()
 
+def model_reset_stats(model):
+    for i in range(len(model.features)):
+        if isinstance(model.features[i], Conv.ALSHConv2d):
+            model.features[i].reset_freq()
+
 def model_bucket_avg(model):
     for i in range(len(model.features)):
         if isinstance(model.features[i], Conv.ALSHConv2d):
-            print(model.features[i].avg_bucket_freq())
+            avg = str(model.features[i].avg_bucket_freq())
+            sum = str(model.features[i].sum_bucket_freq())
+            print('avg of hashes: ' + avg + '; sum of hashes: ' + sum)
 
 def init_weight(l):
     if isinstance(l, nn.Conv2d) or isinstance(l, nn.Linear):
@@ -63,20 +71,25 @@ class Model(nn.Module):
     def __init__(self, num_classes=10):
         super(Model, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=5, stride=1, padding=1),
-            nn.ELU(inplace=True),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, kernel_size=5, stride=1, padding=1),
-            nn.ELU(inplace=True),
-            nn.MaxPool2d(2),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
-            nn.ELU(inplace=True),
+            nn.Conv2d(1, 32, kernel_size=3, stride=1),
+            nn.Hardshrink(lambd=0.3),
+            #nn.Softshrink(),
+            #nn.ReLU(),
+            #nn.Tanh(),
+            #nn.ELU(),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1),
+            nn.Hardshrink(lambd=0.3),
+            #nn.Softshrink(),
+            #nn.ReLU(),
+            #nn.Tanh(),
+            #nn.ELU(),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2)
         )
         self.classifier = nn.Sequential(
-            #nn.Linear(1600, 200),
-            #nn.ReLU(inplace=True),
-            #nn.Dropout(0.5),
-            nn.Linear(576, num_classes),
+            nn.Dropout(),
+            nn.Linear(3872, num_classes),
             nn.Softmax(dim=1)
         )
 
@@ -93,8 +106,6 @@ def main():
 
     train_sampler = None
 
-    #normalize = transforms.Normalize(mean=(0.0,0.0,0.0),
-    #                                 std=(.3,.3,.3))
     normalize = transforms.Normalize(mean=(0.485,0.456,0.406),
                                      std=(0.229,0.224,0.225))
 
@@ -125,23 +136,21 @@ def main():
         val_dataset, batch_size=args.batch_size, shuffle=False,
 	    num_workers=args.workers, pin_memory=False)
 
-    model = torch.load('../Models/MNIST_custommodel_98.99')
+    model_name = 'modelsMNIST_custommodel_98.47'
+    model = Model()#torch.load('/data/zhanglab/afeeney/models/' + model_name)
     print(model)
+    model = model.cuda()
 
     criterion = nn.CrossEntropyLoss()
 
-    #optimizer = optim.SGD(model.parameters(), args.lr, momentum=0.9)
     optimizer = optim.Adam(model.parameters(), args.lr)
 
-    if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model)
-
-    
-    model.train()
     current_depth = len(model.features)-1
     flag = True
-    for epoch in range(args.epochs):
+    for epoch in range(args.depth*args.replace_gap):
         if epoch % args.replace_gap == 0:
+            if current_depth < len(model.features)-1:
+                model.features[current_depth+1].first = False
             current_depth = replace_next_conv(model, current_depth)
             if flag:
                 model.features[current_depth+1].last = True
@@ -149,30 +158,29 @@ def main():
             model.features[current_depth+1].first = True
         model.apply(fix)
 
-        for table in model.features[current_depth+1].tables.tables:
-            for row in table:
-                print(row)
-            print('\n')
-
-
-
         adjust_learning_rate(optimizer, epoch)
         train(train_loader, model, criterion, optimizer, epoch)
-        model.features[current_depth+1].first = False
+
+    # the last replacement is the first ALSHConv2d in the network!
     model.features[current_depth+1].first = True
 
-    model.eval()
+    for epoch in range(args.final_epochs):
+        adjust_learning_rate(optimizer, epoch)
+        train(train_loader, model, criterion, optimizer, epoch)
+
+    model_reset_stats(model)
     top1, top5, avg_batch_time = validate(val_loader, model, criterion)
+    model_bucket_avg(model)
 
     print('\n MNIST Accuracy: \n')
     print(' * Top1: ' + str(top1))
     print(' * Top5: ' + str(top5))
     print('\n')
 
-    file_name = 'MNIST_custommodel_{acc:.2f}'.format(acc=top1.item())
-    path = '../Models/' + file_name
-    torch.save(model, path)
-    print('model saved to ' + path)
+    #file_name = 'MNIST_custommodel_{acc:.2f}'.format(acc=top1.item())
+    #path = '/data/zhanglab/afeeney/models/' + file_name
+    #torch.save(model, path)
+    #print('model saved to ' + path)
 
 
 
@@ -188,6 +196,11 @@ def train(train_loader, model, criterion, optimizer, epoch):
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
         data_time.update(time.time() - end)
+
+        input = input.cuda()
+        target = target.cuda()
+
+        input = input.reshape(input.size(0), 1, 28, 28)
 
         input_var = torch.autograd.Variable(input)
         target_var = torch.autograd.Variable(target)
@@ -231,8 +244,9 @@ def validate(val_loader, model, criterion):
     end = time.time()
     for i, (input, target) in enumerate(val_loader):
         with torch.no_grad():
-            input = input.cpu()
-            target = target.cpu()
+            input = input.cuda()
+            target = target.cuda()
+            input = input.reshape(input.size(0), 1, 28, 28)
 
             input_var = torch.autograd.Variable(input)
             target_var = torch.autograd.Variable(target)

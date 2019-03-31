@@ -53,7 +53,7 @@ class ALSHConv:
         '''
         bins = self.tables.table_size
         item_freq = torch.histc(x.cpu(), bins=bins, max=bins)
-        #self.bucket_stats.update(item_freq)
+        self.bucket_stats.update(item_freq)
         return item_freq.topk(k)[1]
 
     def get_active_set(self, input, kernel_size, stride, padding, dilation,
@@ -72,7 +72,7 @@ class ALSHConv:
 
         for row in range(ti.size(0)):
             topkl[row] = self.most_freq(ti[row], k=k)
-        print(topkl)
+        #print(topkl)
 
         #
         # This may stay as for loops because tables is a python list?

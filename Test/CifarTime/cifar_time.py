@@ -94,7 +94,7 @@ def main():
     time_file_path = '/data/zhanglab/afeeney/times/'
     time_file = open(time_file_path + args.time_file + '_NO_ALSH', 'w+')
 
-    iters = 21 * 5
+    iters = 21 * 7
 
     end = time.time()
     avg_batch_time = validate(val_loader, model, criterion, time_file, iters)

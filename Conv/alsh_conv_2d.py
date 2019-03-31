@@ -38,15 +38,22 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         r'''
         builds the ALSH conv from an existing convolution.
         '''
-        tmp = ALSHConv2d(conv.in_channels, conv.out_channels, conv.kernel_size[0],
+        tmp = ALSHConv2d(conv.in_channels, conv.out_channels,
+                         conv.kernel_size[0],
                          conv.stride, conv.padding, conv.dilation,
                          conv.bias is not None, which_hash, hash_init_params,
                          K, L, max_bits)
         tmp.weight.data = conv.weight.data
         return tmp
 
+    def reset_freq(self):
+        self.bucket_stats.reset()
+
     def avg_bucket_freq(self):
         return self.bucket_stats.avg
+
+    def sum_bucket_freq(self):
+        return self.bucket_stats.sum
 
     def cuda(self, device=None):
         r'''
@@ -60,14 +67,14 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         return self._apply(lambda t: t.cuda(device))
 
     def cpu(self):
+        r'''
+        moves to the CPU. Also sets device used for hashes.
+        '''
         for t in range(len(self.tables.hashes)):
             self.tables.hashes[t].a = self.tables.hashes[t].a.cpu()
             self.tables.hashes[t].bit_mask = self.tables.hashes[t].bit_mask.cpu()
         self.device = torch.device('cpu')
         return self._apply(lambda t: t.cpu())
-
-    def ALSH_mode(self):
-        self.fill_table(self.weight)
 
     def fix(self):
         self.fill_table(self.weight)
@@ -84,26 +91,27 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         LAS = ALSHConv2d.LAS if not self.first else None
 
         AS, ti = self.get_active_set(x, self.kernel_size[0], self.stride,
-                                     self.padding, self.dilation,
-                                     LAS)
+                                     self.padding, self.dilation, LAS)
 
-        if self.first:
-            AK = self.weight[AS]
+        if AS.size(0) < 2:
+            AK = self.weight
         else:
-            AK = self.weight[AS][:,ALSHConv2d.LAS]
+            if self.first:
+                # if its the first ALSHConv2d in the network,
+                # then there is no valid LAS to use!
+                AK = self.weight[AS]
+            else:
+                AK = self.weight[AS][:,ALSHConv2d.LAS]
 
-        print('ALSHConv2d, num filters used: ' + str(AK.size(0)))
+        #print('ALSHConv2d, num filters used: ' + str(AK.size()))
 
-        output = nn.functional.conv2d(x, AK, self.bias[AS],
-                                      self.stride, self.padding,
-                                      self.dilation)
+        #print(self.stride)
+        #print(x.size())
+        output = nn.functional.conv2d(x, AK, bias=self.bias[AS],
+                                      stride=self.stride, padding=self.padding,
+                                      dilation=self.dilation)
 
         h, w = output.size()[2:]
-
-        # scale by the inverse of the fraction of filters used.
-        # retrain step?
-        #scale = AS.size(0) / self.out_channels
-        #output /= scale
 
         if self.last:
             out_dims = (x.size(0), self.out_channels, h, w)
