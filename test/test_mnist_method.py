@@ -1,3 +1,5 @@
+import sys
+sys.path.append('/data/zhanglab/afeeney/ALSHNN/')
 
 import argparse
 import os
@@ -12,8 +14,8 @@ import torchvision.models as models
 import gc
 from PIL import ImageFile
 
-import Conv.alsh_conv_2d as Conv
-from LSH.multi_hash_srp import MultiHash_SRP
+import conv.alsh_conv_2d as Conv
+from lsh.multi_hash_srp import MultiHash_SRP
 
 import time
 
@@ -26,12 +28,16 @@ parser.add_argument('--workers', default=2, type=int, metavar='N')
 parser.add_argument('--print_frequency', default=100, type=int, metavar='N')
 parser.add_argument('--epochs', default=1, type=int, metavar='N')
 parser.add_argument('--batch_size', default=100, type=int, metavar='N')
-parser.add_argument('--lr', '--learning_rate', default=0.1, type=float,
+parser.add_argument('--lr',
+                    '--learning_rate',
+                    default=0.1,
+                    type=float,
                     metavar='LR')
 parser.add_argument('--decay_coef', default=30, type=int, metavar='N')
 parser.add_argument('--replace_gap', default=10, type=int, metavar='N')
 parser.add_argument('--depth', default=4, type=int, metavar='N')
 parser.add_argument('--final_epochs', default=20, type=int, metavar='N')
+
 
 def replace_next_conv(model, current):
     while not isinstance(model.features[current], nn.Conv2d):
@@ -40,21 +46,25 @@ def replace_next_conv(model, current):
         print('REPLACED REGULAR Conv2d WITH ALSHConv2d')
         model.features[current] = Conv.ALSHConv2d.build(
             model.features[current], MultiHash_SRP, {}, 5, 3, 2**5)
-    return current-1
+    return current - 1
+
 
 def fix(m):
     if isinstance(m, Conv.ALSHConv2d):
         m.fix()
         m.cuda()
 
+
 def to_cpu(m):
     if isinstance(m, Conv.ALSHConv2d):
         m = m.cpu()
+
 
 def model_reset_stats(model):
     for i in range(len(model.features)):
         if isinstance(model.features[i], Conv.ALSHConv2d):
             model.features[i].reset_freq()
+
 
 def model_bucket_avg(model):
     for i in range(len(model.features)):
@@ -63,9 +73,11 @@ def model_bucket_avg(model):
             sum = str(model.features[i].sum_bucket_freq())
             print('avg of hashes: ' + avg + '; sum of hashes: ' + sum)
 
+
 def init_weight(l):
     if isinstance(l, nn.Conv2d) or isinstance(l, nn.Linear):
         nn.init.kaiming_normal_(l.weight)
+
 
 class Model(nn.Module):
     def __init__(self, num_classes=10):
@@ -85,18 +97,16 @@ class Model(nn.Module):
             #nn.ELU(),
             nn.Conv2d(32, 32, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(2)
-        )
-        self.classifier = nn.Sequential(
-            nn.Dropout(),
-            nn.Linear(3872, num_classes),
-            nn.Softmax(dim=1)
-        )
+            nn.MaxPool2d(2))
+        self.classifier = nn.Sequential(nn.Dropout(),
+                                        nn.Linear(3872, num_classes),
+                                        nn.Softmax(dim=1))
 
     def forward(self, x):
         x = self.features(x)
         x = x.view(x.size(0), -1)
         return self.classifier(x)
+
 
 def main():
     ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -106,38 +116,46 @@ def main():
 
     train_sampler = None
 
-    normalize = transforms.Normalize(mean=(0.485,0.456,0.406),
-                                     std=(0.229,0.224,0.225))
+    normalize = transforms.Normalize(mean=(0.485, 0.456, 0.406),
+                                     std=(0.229, 0.224, 0.225))
 
     train_transform = transforms.Compose([
         #transforms.RandomResizedCrop(28),
         transforms.ToTensor(),
-        normalize])
+        normalize
+    ])
     val_transform = transforms.Compose([
         #transforms.Resize(32),
         #transforms.CenterCrop(28),
         transforms.ToTensor(),
-        normalize])
+        normalize
+    ])
 
-    train_dataset = torchvision.datasets.MNIST(
-        root=args.data_dir, train=True, download=True,
-        transform=train_transform)
+    train_dataset = torchvision.datasets.MNIST(root=args.data_dir,
+                                               train=True,
+                                               download=True,
+                                               transform=train_transform)
 
-    val_dataset = torchvision.datasets.MNIST(
-        root=args.data_dir, train=False, download=True,
-        transform=val_transform)
+    val_dataset = torchvision.datasets.MNIST(root=args.data_dir,
+                                             train=False,
+                                             download=True,
+                                             transform=val_transform)
 
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=args.batch_size,
-        shuffle=(train_sampler is None), num_workers=args.workers,
-        pin_memory=True, sampler=train_sampler)
+    train_loader = torch.utils.data.DataLoader(train_dataset,
+                                               batch_size=args.batch_size,
+                                               shuffle=(train_sampler is None),
+                                               num_workers=args.workers,
+                                               pin_memory=True,
+                                               sampler=train_sampler)
 
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=args.batch_size, shuffle=False,
-	    num_workers=args.workers, pin_memory=False)
+    val_loader = torch.utils.data.DataLoader(val_dataset,
+                                             batch_size=args.batch_size,
+                                             shuffle=False,
+                                             num_workers=args.workers,
+                                             pin_memory=False)
 
     model_name = 'modelsMNIST_custommodel_98.47'
-    model = Model()#torch.load('/data/zhanglab/afeeney/models/' + model_name)
+    model = Model()  #torch.load('/data/zhanglab/afeeney/models/' + model_name)
     print(model)
     model = model.cuda()
 
@@ -145,24 +163,24 @@ def main():
 
     optimizer = optim.Adam(model.parameters(), args.lr)
 
-    current_depth = len(model.features)-1
+    current_depth = len(model.features) - 1
     flag = True
-    for epoch in range(args.depth*args.replace_gap):
+    for epoch in range(args.depth * args.replace_gap):
         if epoch % args.replace_gap == 0:
-            if current_depth < len(model.features)-1:
-                model.features[current_depth+1].first = False
+            if current_depth < len(model.features) - 1:
+                model.features[current_depth + 1].first = False
             current_depth = replace_next_conv(model, current_depth)
             if flag:
-                model.features[current_depth+1].last = True
+                model.features[current_depth + 1].last = True
                 flag = False
-            model.features[current_depth+1].first = True
+            model.features[current_depth + 1].first = True
         model.apply(fix)
 
         adjust_learning_rate(optimizer, epoch)
         train(train_loader, model, criterion, optimizer, epoch)
 
     # the last replacement is the first ALSHConv2d in the network!
-    model.features[current_depth+1].first = True
+    model.features[current_depth + 1].first = True
 
     for epoch in range(args.final_epochs):
         adjust_learning_rate(optimizer, epoch)
@@ -181,7 +199,6 @@ def main():
     #path = '/data/zhanglab/afeeney/models/' + file_name
     #torch.save(model, path)
     #print('model saved to ' + path)
-
 
 
 def train(train_loader, model, criterion, optimizer, epoch):
@@ -208,7 +225,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
         output = model(input_var)
         loss = criterion(output, target_var)
 
-        prec1, prec5 = accuracy(output.data, target, topk=(1,5))
+        prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
 
         losses.update(loss.item(), input.size(0))
         top1.update(prec1[0], input.size(0))
@@ -228,8 +245,14 @@ def train(train_loader, model, criterion, optimizer, epoch):
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                   'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                  epoch, i, len(train_loader), batch_time=batch_time,
-                  data_time=data_time, loss=losses, top1=top1, top5=top5))
+                      epoch,
+                      i,
+                      len(train_loader),
+                      batch_time=batch_time,
+                      data_time=data_time,
+                      loss=losses,
+                      top1=top1,
+                      top5=top5))
 
 
 def validate(val_loader, model, criterion):
@@ -254,7 +277,7 @@ def validate(val_loader, model, criterion):
             output = model(input_var)
             loss = criterion(output, target_var)
 
-            prec1, prec5 = accuracy(output.data, target, topk=(1,5))
+            prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
 
             losses.update(loss.item(), input.size(0))
             top1.update(prec1[0], input.size(0))
@@ -269,8 +292,12 @@ def validate(val_loader, model, criterion):
                       'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                       'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                       'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                      i, len(val_loader), batch_time=batch_time, loss=losses,
-                      top1=top1, top5=top5))
+                          i,
+                          len(val_loader),
+                          batch_time=batch_time,
+                          loss=losses,
+                          top1=top1,
+                          top5=top5))
 
     return top1.avg, top5.avg, batch_time.avg
 
@@ -292,8 +319,8 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def accuracy(output, target, topk=(1,)):
-    maxk=max(topk)
+def accuracy(output, target, topk=(1, )):
+    maxk = max(topk)
     batch_size = target.size(0)
 
     _, pred = output.topk(maxk, 1, True, True)
@@ -305,30 +332,37 @@ def accuracy(output, target, topk=(1,)):
     res = []
     for k in topk:
         correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
-        res.append(correct_k.mul_(100.0/batch_size))
+        res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
+
 def adjust_learning_rate(optimizer, epoch):
-    lr = args.lr * (0.1 ** (epoch // args.decay_coef))
+    lr = args.lr * (0.1**(epoch // args.decay_coef))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
+
 
 def set_ALSH_mode(m):
     if isinstance(m, Conv.ALSHConv2d):
         m.ALSH_mode()
 
+
 def sqz_cifar():
     model = models.squeezenet1_1(pretrained=True)
-    model.num_classes=10 if args.ten else 100
-    model.classifier[1] = nn.Conv2d(512, model.num_classes, kernel_size=1,
+    model.num_classes = 10 if args.ten else 100
+    model.classifier[1] = nn.Conv2d(512,
+                                    model.num_classes,
+                                    kernel_size=1,
                                     stride=1)
     return model
 
+
 def vgg_cifar(version):
     model = version(pretrained=True)
-    model.num_classes=10 if args.ten else 100
+    model.num_classes = 10 if args.ten else 100
     model.classifier[-1] = nn.Linear(4096, model.num_classes)
     return model
+
 
 if __name__ == "__main__":
     main()

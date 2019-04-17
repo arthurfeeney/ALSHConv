@@ -1,12 +1,12 @@
-
 import torch
 import torch.nn as nn
 import collections
 from statistics import mode
 
+
 class TablesCPU:
-    def __init__(self, num_tables, table_size, which_hash,
-                 hash_init_params, num_hashes, dim):
+    def __init__(self, num_tables, table_size, which_hash, hash_init_params,
+                 num_hashes, dim):
         r"""
         These tables are intended for ALSH on a cpu.
 
@@ -26,17 +26,36 @@ class TablesCPU:
         self.dim = dim
 
         t = range(num_tables)
-        self.hashes = [which_hash(num_hashes,dim,hash_init_params) for _ in t]
+        self.hashes = [
+            which_hash(num_hashes, dim, hash_init_params) for _ in t
+        ]
         # tables does not contain keys. Only values.
-        self.tables = [ [ [] for _ in range(table_size)] for _ in t]
+        self.tables = [[[] for _ in range(table_size)] for _ in t]
+
+    def trim(self, count=4):
+        '''
+        removes last count tables from the list of tables.
+        This may be useful for training ALSHConv2d by making the replacements
+        a little slower initially. 
+        '''
+        if len(self.tables) > 3:
+            del self.hashes[-count:]
+            del self.tables[-count:]
+            self.num_tables -= count 
+            print(self.num_tables)
+            return True
+        return False
+
 
     def get(self, key, **kwargs):
-        return torch.stack([hash.query(key, **kwargs) % self.table_size for hash in self.hashes])
-
+        return torch.stack([
+            hash.query(key, **kwargs) % self.table_size for hash in self.hashes
+        ])
 
     def put(self, key, **kwargs):
-        return [hash.pre(key, **kwargs) % self.table_size for hash in self.hashes]
-
+        return [
+            hash.pre(key, **kwargs) % self.table_size for hash in self.hashes
+        ]
 
     def insert(self, key, value):
         r"""
@@ -47,7 +66,6 @@ class TablesCPU:
         for ti in torch.arange(0, self.num_tables):
             self.tables[ti][rows[ti]].append(value)
 
-
     def insert_data(self, keys, values):
         r"""
         inserts a sequence of values into tables based on keys.
@@ -57,7 +75,7 @@ class TablesCPU:
         """
 
         t = range(self.num_tables)
-        self.tables = [ [ [] for _ in range(self.table_size)] for _ in t]
+        self.tables = [[[] for _ in range(self.table_size)] for _ in t]
         rows = self.put(keys)
 
         # can parallelize outer loop for each table?
@@ -69,11 +87,10 @@ class TablesCPU:
 
     def get_query_rows(self, q):
         indices = self._get(q)
-        rows = [None]*self.num_tables
+        rows = [None] * self.num_tables
         for ti in torch.arange(0, self.num_tables):
             rows[ti] = self.tables[ti][indices[ti]]
         return rows
-
 
     def clear_row(self, row_indices):
         r"""
@@ -86,8 +103,3 @@ class TablesCPU:
                 for r in row.long():
                     self.tables[ti][r] = []
             #self.tables[ti][row_indices[ti]] = torch.Tensor([]).long()
-
-
-
-
-

@@ -1,30 +1,54 @@
-
 import torch
 import torch.nn as nn
-from Conv.alsh_conv import ALSHConv
+from conv.alsh_conv import ALSHConv
+
 
 def zero_fill_missing(x, i, dims, device):
     r"""
     fills channels that weren't computed with zeros.
     """
     t = torch.empty(dims).to(x).fill_(0)
-    t[:,i,:,:] = x[:,]
+    t[:, i, :, :] = x[:, ]
     return t
+
 
 class ALSHConv2d(nn.Conv2d, ALSHConv):
 
-    LAS = None # static class variable to track last called layer's active set.
+    LAS = None  # static class variable to track last called layer's active set.
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride,
-                 padding, dilation, bias, which_hash, hash_init_params,
-                 K, L, max_bits, device='cpu'):
-        super().__init__(in_channels, out_channels, kernel_size,
-                         stride=stride, padding=padding, dilation=dilation,
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size,
+                 stride,
+                 padding,
+                 dilation,
+                 bias,
+                 which_hash,
+                 hash_init_params,
+                 K,
+                 L,
+                 final_L,
+                 max_bits,
+                 device='cpu'):
+        super().__init__(in_channels,
+                         out_channels,
+                         kernel_size,
+                         stride=stride,
+                         padding=padding,
+                         dilation=dilation,
                          bias=bias)
 
         alsh_dim = in_channels * kernel_size * kernel_size
-        self.init_ALSH(L, max_bits, which_hash, hash_init_params, K,
-                       alsh_dim+2, out_channels, device=device)
+        self.init_ALSH(L,
+                       final_L,
+                       max_bits,
+                       which_hash,
+                       hash_init_params,
+                       K,
+                       alsh_dim + 2,
+                       out_channels,
+                       device=device)
         self.cpu()
         # cache is used for modifying ALSH tables after an update.
         self.cache = None
@@ -32,19 +56,25 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         self.first = False
         self.last = False
 
-
     @staticmethod
-    def build(conv, which_hash, hash_init_params, K, L, max_bits):
+    def build(conv, which_hash, hash_init_params, K, L, final_L, max_bits):
         r'''
         builds the ALSH conv from an existing convolution.
         '''
         tmp = ALSHConv2d(conv.in_channels, conv.out_channels,
-                         conv.kernel_size[0],
-                         conv.stride, conv.padding, conv.dilation,
-                         conv.bias is not None, which_hash, hash_init_params,
-                         K, L, max_bits)
+                         conv.kernel_size[0], conv.stride, conv.padding,
+                         conv.dilation, conv.bias is not None, which_hash,
+                         hash_init_params, K, L, final_L, max_bits)
         tmp.weight.data = conv.weight.data
         return tmp
+
+    def use_naive(self):
+        '''
+        when first and last are true, it fills output with zeros rather than
+        sharing the last active set.
+        '''
+        self.first = True
+        self.last = True
 
     def reset_freq(self):
         self.bucket_stats.reset()
@@ -72,7 +102,8 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         '''
         for t in range(len(self.tables.hashes)):
             self.tables.hashes[t].a = self.tables.hashes[t].a.cpu()
-            self.tables.hashes[t].bit_mask = self.tables.hashes[t].bit_mask.cpu()
+            self.tables.hashes[t].bit_mask = self.tables.hashes[
+                t].bit_mask.cpu()
         self.device = torch.device('cpu')
         return self._apply(lambda t: t.cpu())
 
@@ -98,17 +129,18 @@ class ALSHConv2d(nn.Conv2d, ALSHConv):
         else:
             if self.first:
                 # if its the first ALSHConv2d in the network,
-                # then there is no valid LAS to use!
+                # then there is no LAS to use!
                 AK = self.weight[AS]
             else:
-                AK = self.weight[AS][:,ALSHConv2d.LAS]
+                AK = self.weight[AS][:, ALSHConv2d.LAS]
 
-        #print('ALSHConv2d, num filters used: ' + str(AK.size()))
+        print(str(AS.size(0)) + '/' + str(self.weight.size(0)))
 
-        #print(self.stride)
-        #print(x.size())
-        output = nn.functional.conv2d(x, AK, bias=self.bias[AS],
-                                      stride=self.stride, padding=self.padding,
+        output = nn.functional.conv2d(x,
+                                      AK,
+                                      bias=self.bias[AS],
+                                      stride=self.stride,
+                                      padding=self.padding,
                                       dilation=self.dilation)
 
         h, w = output.size()[2:]
